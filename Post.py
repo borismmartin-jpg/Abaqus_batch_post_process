@@ -20,8 +20,10 @@ step_name = "Load-to-Failure"
 target_load = 350000.0   # N
 peeq_threshold = 1e-6
 output_summary = "SUMMARY_RESULTS.csv"
+output_root_folder = "output"
 output_curves_folder = "CURVES"
 output_images_folder = "IMAGES"
+output_combined_curve = "COMBINED_LOAD_DISPLACEMENT.csv"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
 image_modes = ["S_MISES"]  # Add "STH" only when shell thickness output exists in ODB
 MIDSPAN_SET = "N-MIDSPAN-BOT"
@@ -225,7 +227,7 @@ def export_image(odb_path, target_lpf, mode):
 # Single ODB processing
 # -------------------------
 def process_odb(odb_file):
-    job_name = odb_file.replace(".odb","")
+    job_name = os.path.basename(odb_file).replace(".odb","")
     print(f"[PROCESSING] {job_name}")
     odb = openOdb(odb_file)
     step = safe_get_step(odb)
@@ -261,6 +263,24 @@ def process_odb(odb_file):
         "Failure Zone": failure_zone
     }
 
+
+def write_combined_curve(results):
+    combined_file = output_combined_curve
+    with open(combined_file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Job", "Disp (mm)", "Load (kN)"])
+        for row in results:
+            curve_file = os.path.join(output_curves_folder, f"{row['Job']}_curve.csv")
+            if not os.path.isfile(curve_file):
+                continue
+            with open(curve_file, "r") as curve_in:
+                reader = csv.reader(curve_in)
+                next(reader, None)  # skip header
+                for d, l in reader:
+                    writer.writerow([row["Job"], d, l])
+
+    print(f"[OK] Combined curve written to {combined_file}")
+
 # =========================
 # ======== MAIN ===========
 # =========================
@@ -269,7 +289,14 @@ if not os.path.isdir(folder_path):
     raise FileNotFoundError(f"Folder does not exist: {folder_path}")
 
 os.chdir(folder_path)
+if not os.path.exists(output_root_folder):
+    os.makedirs(output_root_folder)
+os.chdir(output_root_folder)
+
 odb_files = [f for f in os.listdir() if f.endswith(".odb")]
+if not odb_files:
+    odb_files = [f for f in os.listdir("..") if f.endswith(".odb")]
+    odb_files = [os.path.join("..", f) for f in odb_files]
 print(f"[INFO] Found {len(odb_files)} ODB files in: {folder_path}")
 
 # -------------------------
@@ -292,6 +319,7 @@ if results:
         writer.writeheader()
         writer.writerows(results)
     print(f"\n[OK] Summary written to {output_summary}")
+    write_combined_curve(results)
 
 # -------------------------
 # POST-PROCESSING: Export images
