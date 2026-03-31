@@ -40,6 +40,17 @@ def select_odb_folder(default_folder):
         folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
     except Exception as e:
         print("[WARN] input() unavailable in this Abaqus session: {}".format(e))
+        cwd = os.getcwd()
+        default_has_odb = os.path.isdir(default_folder) and any(f.endswith(".odb") for f in os.listdir(default_folder))
+        cwd_has_odb = os.path.isdir(cwd) and any(f.endswith(".odb") for f in os.listdir(cwd))
+
+        if default_has_odb:
+            print("[INFO] Using default folder_path: {}".format(default_folder))
+            return default_folder
+        if cwd_has_odb:
+            print("[INFO] Default folder has no ODB files; using current directory: {}".format(cwd))
+            return cwd
+
         print("[INFO] Using default folder_path: {}".format(default_folder))
         return default_folder
     if folder:

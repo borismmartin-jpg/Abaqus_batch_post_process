@@ -25,6 +25,17 @@ def select_input_folder(default_folder):
         folder = input("Enter full folder path with .inp files (press Enter to use default): ").strip().strip('"')
     except Exception as e:
         print("[WARN] input() unavailable in this Abaqus session: {}".format(e))
+        cwd = os.getcwd()
+        default_has_inp = os.path.isdir(default_folder) and any(f.endswith(".inp") for f in os.listdir(default_folder))
+        cwd_has_inp = os.path.isdir(cwd) and any(f.endswith(".inp") for f in os.listdir(cwd))
+
+        if default_has_inp:
+            print("[INFO] Using default input folder: {}".format(default_folder))
+            return default_folder
+        if cwd_has_inp:
+            print("[INFO] Default input folder has no INP files; using current directory: {}".format(cwd))
+            return cwd
+
         print("[INFO] Using default input folder: {}".format(default_folder))
         return default_folder
     if folder:
