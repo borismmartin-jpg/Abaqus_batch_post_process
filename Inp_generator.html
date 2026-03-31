@@ -168,6 +168,7 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
   <div class="hright">
     <span class="hpill">S4R Shell</span>
     <span class="hpill">*.inp</span>
+    <span class="hpill" id="verPill">v1.0.0</span>
   </div>
 </header>
 
@@ -534,6 +535,7 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
 
 <script>
 'use strict';
+var APP_VERSION = '1.0.0';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STATE
@@ -1147,6 +1149,7 @@ function makeINP(prof, p, idx) {
   w('** ================================================================');
   w('** File    : '+fileNum+'_'+prof.label+'.inp');
   w('** Date    : '+date);
+  w('** Version : v'+APP_VERSION);
   w('** Section : '+sectKey+(isOv?' [OVERRIDDEN]':''));
   w('** Test    : '+testType);
   w('** Mesh    : S4R shell   Nodes='+totalNodes+'   Elements='+totalElems);
@@ -1457,6 +1460,7 @@ function toast(msg) {
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('verPill').textContent = 'v' + APP_VERSION;
   loadStd();
   setBend('3pt');
   onP();
