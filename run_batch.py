@@ -1,26 +1,58 @@
 import os
 import subprocess
+import tkinter as tk
+from tkinter import filedialog
 
 # =========================
 # USER SETTINGS
 # =========================
-folder_path = r"C:\Users\borism\Desktop\Claude Inp file"  # your folder
 ABAQUS_CMD = r"C:\SIMULIA\Commands\abaqus.bat"
+
+# Optional fallback folder if the file browser is unavailable/canceled.
+# Leave as None to require folder selection through file browser or env var.
+DEFAULT_INPUT_FOLDER = None
 
 cpus = 4
 memory = "90%"
 run_in_background = False  # False = sequential (recommended)
 
+
 # =========================
 # FUNCTIONS
 # =========================
+def select_input_folder():
+    """Select input directory without using console input (Abaqus-safe)."""
+    env_folder = os.environ.get("ABAQUS_INPUT_FOLDER", "").strip().strip('"')
+    if env_folder:
+        return env_folder
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select folder containing .inp files")
+        root.destroy()
+        if folder:
+            return folder
+    except tk.TclError:
+        # GUI not available (e.g., headless session)
+        pass
+
+    if DEFAULT_INPUT_FOLDER:
+        return DEFAULT_INPUT_FOLDER
+
+    raise RuntimeError(
+        "No input folder selected. Set ABAQUS_INPUT_FOLDER or DEFAULT_INPUT_FOLDER."
+    )
+
+
 def is_job_completed(job_name):
     """Check if job already completed successfully"""
     sta_file = job_name + ".sta"
     if not os.path.exists(sta_file):
         return False
 
-    with open(sta_file, 'r') as f:
+    with open(sta_file, "r") as f:
         content = f.read()
         return "COMPLETED SUCCESSFULLY" in content
 
@@ -58,11 +90,16 @@ def run_job(inp_file):
 # =========================
 # MAIN
 # =========================
+folder_path = select_input_folder()
+
+if not os.path.isdir(folder_path):
+    raise FileNotFoundError(f"Folder does not exist: {folder_path}")
+
 os.chdir(folder_path)
 
 inp_files = [f for f in os.listdir(folder_path) if f.endswith(".inp")]
 
-print(f"Found {len(inp_files)} .inp files\n")
+print(f"Found {len(inp_files)} .inp files in: {folder_path}\n")
 
 for inp in inp_files:
     run_job(inp)
