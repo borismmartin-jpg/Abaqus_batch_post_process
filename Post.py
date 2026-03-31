@@ -347,8 +347,7 @@ def process_odb(odb_file, output_curves_folder):
         "Stiffness (kN/mm)": stiffness,
         "Energy (kN.mm)": energy,
         "Max Stress (MPa)": max_stress,
-        "Max PEEQ": max_peeq,
-        "Failure Zone": failure_zone
+        "Max PEEQ": max_peeq
     }
     curve_payload = {
         "Job": job_name,
