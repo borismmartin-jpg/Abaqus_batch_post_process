@@ -21,10 +21,14 @@ target_load = 350000.0   # N
 peeq_threshold = 1e-6
 output_summary = "SUMMARY_RESULTS.csv"
 output_curves_folder = "CURVES"
+output_combined_curve = "COMBINED_LOAD_DISPLACEMENT.csv"
 output_images_folder = "IMAGES"
-target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
-image_modes = ["S_MISES"]  # Add "STH" only when shell thickness output exists in ODB
+output_thickness_images_folder = "THICKNESS_IMAGES"
+image_modes = ["S_MISES"]
+thickness_image_modes = ["STH"]  # Shell thickness contour images
 MIDSPAN_SET = "N-MIDSPAN-BOT"
+SUPPORT_SET = "N-SUPPORT"
+NUM_SUPPORTS = 2  # If SUPPORT_SET contains one support line, scale RF2 to total test load
 ELSETS = {
     "BF": "E-BF-MIDSPAN",
     "TF": "E-TF-MIDSPAN",
@@ -77,14 +81,18 @@ def safe_get_step(odb):
 # -------------------------
 def extract_curve_data(step, odb):
     disp, load = [], []
-    region = odb.rootAssembly.nodeSets[MIDSPAN_SET]
+    disp_region = odb.rootAssembly.nodeSets[MIDSPAN_SET]
+    rf_region = odb.rootAssembly.nodeSets[SUPPORT_SET]
 
     for frame in step.frames:
-        lpf = frame.frameValue
-        u = frame.fieldOutputs["U"].getSubset(region=region)
+        u = frame.fieldOutputs["U"].getSubset(region=disp_region)
+        rf = frame.fieldOutputs["RF"].getSubset(region=rf_region)
+
         u2 = max([abs(v.data[1]) for v in u.values])
+        rf2 = sum([v.data[1] for v in rf.values])
+
         disp.append(u2)
-        load.append(lpf * target_load)
+        load.append(abs(rf2) * NUM_SUPPORTS)
     return np.array(disp), np.array(load)
 
 # -------------------------
@@ -234,8 +242,12 @@ def process_odb(odb_file):
     disp, load = extract_curve_data(step, odb)
     max_disp = float(np.max(disp))
     peak_load = float(np.max(load)/1000.0)
+    peak_lpf = float(step.frames[int(np.argmax(load))].frameValue)
     yield_lpf = detect_first_yield(step)
-    yield_load = yield_lpf * target_load / 1000.0 if yield_lpf else None
+    yield_load = None
+    if yield_lpf is not None:
+        closest_idx = int(np.argmin(np.abs(np.array([f.frameValue for f in step.frames]) - yield_lpf)))
+        yield_load = float(load[closest_idx] / 1000.0)
     stiffness = compute_stiffness(disp, load)
     energy = compute_energy(disp, load)
     max_stress, max_peeq, failure_zone = extract_local_metrics(step, odb)
@@ -252,14 +264,30 @@ def process_odb(odb_file):
     return {
         "Job": job_name,
         "Yield Load (kN)": yield_load,
+        "Yield LPF": yield_lpf,
         "Peak Load (kN)": peak_load,
+        "Peak Load LPF": peak_lpf,
         "Max Disp (mm)": max_disp,
         "Stiffness (kN/mm)": stiffness,
         "Energy (kN.mm)": energy,
         "Max Stress (MPa)": max_stress,
         "Max PEEQ": max_peeq,
-        "Failure Zone": failure_zone
+        "Failure Zone": failure_zone,
+        "Curve Disp (mm)": disp.tolist(),
+        "Curve Load (kN)": (load / 1000.0).tolist()
     }
+
+
+def export_combined_curve(results):
+    with open(output_combined_curve, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Job", "Disp (mm)", "Load (kN)"])
+        for row in results:
+            disp = row.get("Curve Disp (mm)", [])
+            load = row.get("Curve Load (kN)", [])
+            for d, l in zip(disp, load):
+                writer.writerow([row["Job"], d, l])
+    print(f"[OK] Combined load-displacement data written to {output_combined_curve}")
 
 # =========================
 # ======== MAIN ===========
@@ -286,22 +314,56 @@ for odb_file in odb_files:
 # POST-PROCESSING: Save CSV
 # -------------------------
 if results:
-    keys = results[0].keys()
+    export_combined_curve(results)
+    cleaned_results = []
+    for row in results:
+        reduced = dict(row)
+        reduced.pop("Curve Disp (mm)", None)
+        reduced.pop("Curve Load (kN)", None)
+        cleaned_results.append(reduced)
+    keys = cleaned_results[0].keys()
     with open(output_summary, "w",newline="") as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
-        writer.writerows(results)
+        writer.writerows(cleaned_results)
     print(f"\n[OK] Summary written to {output_summary}")
 
 # -------------------------
 # POST-PROCESSING: Export images
 # -------------------------
 for odb_file in odb_files:
+    odb_result = next((r for r in results if r["Job"] == odb_file.replace(".odb", "")), None)
+    if not odb_result:
+        continue
+    stress_targets = [odb_result["Peak Load LPF"]]
+    if odb_result["Yield LPF"] is not None:
+        stress_targets = [odb_result["Yield LPF"], odb_result["Peak Load LPF"]]
     for mode in image_modes:
-        for lpf in target_LPFs_for_image:
+        for lpf in stress_targets:
             try:
                 export_image(odb_file, lpf, mode)
             except Exception as e:
                 print(f"[ERROR IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
+
+# Thickness images in a dedicated folder
+if not os.path.exists(output_thickness_images_folder):
+    os.makedirs(output_thickness_images_folder)
+
+original_images_folder = output_images_folder
+output_images_folder = output_thickness_images_folder
+for odb_file in odb_files:
+    odb_result = next((r for r in results if r["Job"] == odb_file.replace(".odb", "")), None)
+    if not odb_result:
+        continue
+    thickness_targets = [odb_result["Peak Load LPF"]]
+    if odb_result["Yield LPF"] is not None:
+        thickness_targets = [odb_result["Yield LPF"], odb_result["Peak Load LPF"]]
+    for mode in thickness_image_modes:
+        for lpf in thickness_targets:
+            try:
+                export_image(odb_file, lpf, mode)
+            except Exception as e:
+                print(f"[ERROR THICKNESS IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
+output_images_folder = original_images_folder
 
 print("\n[OK] Images exported")
