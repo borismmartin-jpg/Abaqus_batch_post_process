@@ -6,6 +6,7 @@ from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
 import os, csv
+import sys
 import numpy as np
 
 APP_VERSION = "2.0.0-wip"
@@ -33,10 +34,19 @@ ELSETS = {
 def resolve_odb_folder(default_path):
     """
     Prompt user for ODB folder path; press Enter to keep configured default.
+    In non-interactive runs (e.g., noGUI batch), silently use default.
     """
+    if not sys.stdin or not sys.stdin.isatty():
+        print(f"[INFO] Non-interactive run detected. Using default folder_path: {default_path}")
+        return default_path
+
     print("\n[INPUT] ODB folder selection")
     print(f"Default folder_path: {default_path}")
-    user_path = input("Enter folder path containing .odb files (press Enter to use default): ").strip().strip('"')
+    try:
+        user_path = input("Enter folder path containing .odb files (press Enter to use default): ").strip().strip('"')
+    except EOFError:
+        print(f"[INFO] Input unavailable. Using default folder_path: {default_path}")
+        return default_path
     return user_path if user_path else default_path
 
 # =========================
