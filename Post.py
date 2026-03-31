@@ -9,7 +9,6 @@ import os, csv
 import tkinter as tk
 from tkinter import filedialog
 import numpy as np
-import matplotlib.pyplot as plt
 
 APP_VERSION = "2.0.0-wip"
 
@@ -284,23 +283,41 @@ def export_initial_thickness_image(odb_path):
         odb.close()
 
 
-def export_combined_curve_plot(results, output_plot="COMBINED_LOAD_DISPLACEMENT.png"):
-    plt.figure(figsize=(8, 6))
+def export_combined_curve_plot(results, output_plot="COMBINED_LOAD_DISPLACEMENT"):
+    xyplot_name = "XYPlot_COMBINED_LD"
+    vp_name = "VP_COMBINED_LD"
+    if xyplot_name in session.xyPlots:
+        del session.xyPlots[xyplot_name]
+    if vp_name in session.viewports:
+        del session.viewports[vp_name]
+
+    xyplot = session.XYPlot(name=xyplot_name)
+    chart_key = xyplot.charts.keys()[0]
+    chart = xyplot.charts[chart_key]
+
+    curves = []
     for row in results:
         disp = row.get("Curve Disp (mm)", [])
         load = row.get("Curve Load (kN)", [])
-        if disp and load:
-            plt.plot(disp, load, label=row["Job"])
-    plt.xlabel("Displacement (mm)")
-    plt.ylabel("Load (kN)")
-    plt.title("Load-Displacement Curves")
-    plt.grid(True, alpha=0.3)
-    if len(results) <= 12:
-        plt.legend(loc="best", fontsize=8)
-    plt.tight_layout()
-    plt.savefig(output_plot, dpi=200)
-    plt.close()
-    print(f"[OK] Combined load-displacement plot written to {output_plot}")
+        if not disp or not load:
+            continue
+        xy_name = "LD_" + row["Job"]
+        if xy_name in session.xyDataObjects:
+            del session.xyDataObjects[xy_name]
+        pairs = tuple((float(d), float(l)) for d, l in zip(disp, load))
+        xy_data = session.XYData(data=pairs, name=xy_name)
+        curves.append(session.Curve(xyData=xy_data))
+
+    if not curves:
+        print("[WARN] No curve data available for combined plot.")
+        return
+
+    chart.setValues(curvesToPlot=tuple(curves))
+    vp = session.Viewport(name=vp_name, origin=(0, 0), width=200, height=150)
+    vp.setValues(displayedObject=xyplot)
+    vp.view.fitView()
+    session.printToFile(fileName=output_plot, format=PNG, canvasObjects=(vp,))
+    print(f"[OK] Combined load-displacement plot written to {output_plot}.png")
 # -------------------------
 # Single ODB processing
 # -------------------------
