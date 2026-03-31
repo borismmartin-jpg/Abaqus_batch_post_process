@@ -7,6 +7,7 @@ from abaqusConstants import *
 from odbAccess import openOdb
 import displayGroupOdbToolset as dgo
 import os, csv
+import re
 import numpy as np
 
 # =========================
@@ -73,15 +74,43 @@ def setup_output_paths(base_folder):
             os.makedirs(p)
 
     return output_summary, output_elset_check, output_curves_folder, output_images_folder, output_thickness_folder
+
+def extract_lpf_from_description(frame):
+    match = re.search(r"LPF\s*=\s*([\-+0-9.eE]+)", frame.description)
+    if match:
+        return float(match.group(1))
+    return None
+
+def get_frame_load_factors(step):
+    raw_factors = []
+    has_explicit_lpf = False
+
+    for frame in step.frames:
+        lpf = extract_lpf_from_description(frame)
+        if lpf is not None:
+            raw_factors.append(lpf)
+            has_explicit_lpf = True
+        else:
+            raw_factors.append(frame.frameValue)
+
+    # If LPF is not explicitly available and frameValue looks like time/increment scale,
+    # normalize by the final frame so load stays anchored to target_load.
+    if (not has_explicit_lpf) and raw_factors:
+        final_val = raw_factors[-1]
+        max_abs_val = max(abs(v) for v in raw_factors)
+        if abs(final_val) > 1e-12 and max_abs_val > 5.0:
+            raw_factors = [v / final_val for v in raw_factors]
+
+    return raw_factors
 # -------------------------
 # Curve extraction
 # -------------------------
 def extract_curve_data(step, odb):
     disp, load = [], []
     region = odb.rootAssembly.nodeSets[MIDSPAN_SET]
+    load_factors = get_frame_load_factors(step)
 
-    for frame in step.frames:
-        lpf = frame.frameValue
+    for frame, lpf in zip(step.frames, load_factors):
         u = frame.fieldOutputs["U"].getSubset(region=region)
         u2 = max([abs(v.data[1]) for v in u.values])
         disp.append(u2)
@@ -104,12 +133,13 @@ def compute_stiffness(disp, load):
 # First yield detection
 # -------------------------
 def detect_first_yield(step):
-    for frame in step.frames:
+    load_factors = get_frame_load_factors(step)
+    for frame, lpf in zip(step.frames, load_factors):
         if "PEEQ" not in frame.fieldOutputs:
             continue
         peeq = frame.fieldOutputs["PEEQ"]
         if any(v.data > peeq_threshold for v in peeq.values):
-            return frame.frameValue
+            return lpf
     return None
 
 # -------------------------
@@ -162,7 +192,9 @@ def compute_energy(disp, load):
 # Stress image export
 # -------------------------
 def find_closest_frame(step, target_lpf):
-    return min(step.frames, key=lambda f: abs(f.frameValue - target_lpf))
+    load_factors = get_frame_load_factors(step)
+    best_idx = min(range(len(step.frames)), key=lambda i: abs(load_factors[i] - target_lpf))
+    return step.frames[best_idx]
 def export_stress_image(odb_path, target_lpf, output_images_folder):
     job_name = os.path.basename(odb_path).replace(".odb", "")
     odb = openOdb(path=odb_path)  # <-- use openOdb
