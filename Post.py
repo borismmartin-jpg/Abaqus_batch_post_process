@@ -5,6 +5,7 @@
 from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
+import displayGroupOdbToolset as dgo
 import os, csv
 import numpy as np
 
@@ -15,10 +16,12 @@ folder_path = r"C:\Users\borism\Desktop\Claude Inp file"
 step_name = "Load-to-Failure"
 target_load = 350.0      # kN
 peeq_threshold = 1e-6
-output_summary = "SUMMARY_RESULTS.csv"
-output_curves_folder = "CURVES"
-output_images_folder = "IMAGES"
-output_thickness_folder = "THICKNESS_IMAGES"
+output_root_folder_name = "POST_OUTPUT"
+output_summary_name = "SUMMARY_RESULTS.csv"
+output_elset_check_name = "ELSET_CHECK.csv"
+output_curves_folder_name = "CURVES"
+output_images_folder_name = "IMAGES"
+output_thickness_folder_name = "THICKNESS_IMAGES"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
 MIDSPAN_SET = "N-MIDSPAN-BOT"
 ELSETS = {
@@ -37,6 +40,31 @@ def safe_get_step(odb):
     else:
         first_step_name = list(odb.steps.keys())[0]
         return odb.steps[first_step_name]
+
+def prompt_for_folder(default_folder):
+    try:
+        folder_input = raw_input(f"Enter folder containing ODB files [default: {default_folder}]: ").strip()
+    except NameError:
+        folder_input = input(f"Enter folder containing ODB files [default: {default_folder}]: ").strip()
+
+    selected_folder = folder_input if folder_input else default_folder
+    if not os.path.isdir(selected_folder):
+        raise ValueError(f"Folder not found: {selected_folder}")
+    return selected_folder
+
+def setup_output_paths(base_folder):
+    output_root = os.path.join(base_folder, output_root_folder_name)
+    output_summary = os.path.join(output_root, output_summary_name)
+    output_elset_check = os.path.join(output_root, output_elset_check_name)
+    output_curves_folder = os.path.join(output_root, output_curves_folder_name)
+    output_images_folder = os.path.join(output_root, output_images_folder_name)
+    output_thickness_folder = os.path.join(output_root, output_thickness_folder_name)
+
+    for p in [output_root, output_curves_folder, output_images_folder, output_thickness_folder]:
+        if not os.path.exists(p):
+            os.makedirs(p)
+
+    return output_summary, output_elset_check, output_curves_folder, output_images_folder, output_thickness_folder
 # -------------------------
 # Curve extraction
 # -------------------------
@@ -127,7 +155,7 @@ def compute_energy(disp, load):
 # -------------------------
 def find_closest_frame(step, target_lpf):
     return min(step.frames, key=lambda f: abs(f.frameValue - target_lpf))
-def export_stress_image(odb_path, target_lpf):
+def export_stress_image(odb_path, target_lpf, output_images_folder):
     job_name = os.path.basename(odb_path).replace(".odb", "")
     odb = openOdb(path=odb_path)  # <-- use openOdb
     step = odb.steps[step_name]
@@ -152,7 +180,7 @@ def export_stress_image(odb_path, target_lpf):
 # -------------------------
 # Thickness image export
 # -------------------------
-def export_thickness_image(odb_path):
+def export_thickness_image(odb_path, output_thickness_folder, output_elset_check):
     job_name = os.path.basename(odb_path).replace(".odb", "")
     odb = openOdb(path=odb_path)
     step = safe_get_step(odb)
@@ -163,28 +191,55 @@ def export_thickness_image(odb_path):
     # Thickness is generally available as STH for shell elements.
     frame = step.frames[-1]
     vp.odbDisplay.setFrame(step=step.name, frame=frame.incrementNumber)
+    has_thickness_output = False
     if "STH" in frame.fieldOutputs:
         vp.odbDisplay.setPrimaryVariable(variableLabel='STH', outputPosition=INTEGRATION_POINT)
+        has_thickness_output = True
     elif "H" in frame.fieldOutputs:
         vp.odbDisplay.setPrimaryVariable(variableLabel='H', outputPosition=INTEGRATION_POINT)
-    else:
-        print(f"[WARNING] {job_name}: no shell thickness field output (STH/H) found.")
+        has_thickness_output = True
+
+    if has_thickness_output:
+        vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
+        vp.view.fitView()
+        file_path = os.path.join(output_thickness_folder, f"{job_name}_THICKNESS.png")
+        session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
         odb.close()
         return
 
-    vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
-    vp.view.fitView()
+    # Fallback: no shell thickness output -> check configured element sets
+    records = []
+    for zone, elset_name in ELSETS.items():
+        candidates = [f"IBEAM-1.{elset_name}", elset_name]
+        selected_set = None
+        for set_name in candidates:
+            if set_name in odb.rootAssembly.elementSets.keys():
+                selected_set = set_name
+                break
 
-    if not os.path.exists(output_thickness_folder):
-        os.makedirs(output_thickness_folder)
+        if selected_set is None:
+            records.append([job_name, zone, elset_name, "MISSING", 0])
+            continue
 
-    file_path = os.path.join(output_thickness_folder, f"{job_name}_THICKNESS.png")
-    session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
+        count = len(odb.rootAssembly.elementSets[selected_set].elements)
+        records.append([job_name, zone, selected_set, "FOUND", count])
+        vp.odbDisplay.displayGroup.replace(leaf=dgo.LeafFromElementSets(elementSets=(selected_set, )))
+        vp.view.fitView()
+        zone_img = os.path.join(output_thickness_folder, f"{job_name}_ELSET_{zone}.png")
+        session.printToFile(fileName=zone_img, format=PNG, canvasObjects=(vp,))
+
+    with open(output_elset_check, "a", newline="") as ef:
+        w = csv.writer(ef)
+        if ef.tell() == 0:
+            w.writerow(["Job", "Zone", "Element Set", "Status", "Element Count"])
+        w.writerows(records)
+
+    print(f"[INFO] {job_name}: shell thickness output missing; exported ELSET-based images/check.")
     odb.close()
 # -------------------------
 # Single ODB processing
 # -------------------------
-def process_odb(odb_file):
+def process_odb(odb_file, output_curves_folder):
     job_name = odb_file.replace(".odb","")
     print(f"[PROCESSING] {job_name}")
     odb = openOdb(odb_file)
@@ -224,7 +279,9 @@ def process_odb(odb_file):
 # =========================
 # ======== MAIN ===========
 # =========================
-os.chdir(folder_path)
+selected_folder = prompt_for_folder(folder_path)
+os.chdir(selected_folder)
+output_summary, output_elset_check, output_curves_folder, output_images_folder, output_thickness_folder = setup_output_paths(selected_folder)
 odb_files = [f for f in os.listdir() if f.endswith(".odb")]
 
 # -------------------------
@@ -233,7 +290,7 @@ odb_files = [f for f in os.listdir() if f.endswith(".odb")]
 results = []
 for odb_file in odb_files:
     try:
-        results.append(process_odb(odb_file))
+        results.append(process_odb(odb_file, output_curves_folder))
     except Exception as e:
         print(f"[ERROR] {odb_file}: {e}")
 
@@ -242,7 +299,7 @@ for odb_file in odb_files:
 # -------------------------
 if results:
     keys = results[0].keys()
-    with open(output_summary, "w",newline="") as f:
+    with open(output_summary, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
         writer.writerows(results)
@@ -254,13 +311,13 @@ if results:
 for odb_file in odb_files:
     for lpf in target_LPFs_for_image:
         try:
-            export_stress_image(odb_file, lpf)
+            export_stress_image(odb_file, lpf, output_images_folder)
         except Exception as e:
             print(f"[ERROR IMAGE] {odb_file}: {e}")
 
 for odb_file in odb_files:
     try:
-        export_thickness_image(odb_file)
+        export_thickness_image(odb_file, output_thickness_folder, output_elset_check)
     except Exception as e:
         print(f"[ERROR THICKNESS IMAGE] {odb_file}: {e}")
 
