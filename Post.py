@@ -142,7 +142,8 @@ def extract_curve_data(step, odb):
             total_rf2 = 0.0
             for sreg in support_regions:
                 rf = frame.fieldOutputs["RF"].getSubset(region=sreg)
-                total_rf2 += sum(v.data[1] for v in rf.values)
+                for v in rf.values:
+                    total_rf2 += v.data[1]
             load.append(abs(total_rf2) / 1000.0)  # kN from RF2 (N)
         else:
             load.append(lpf * target_load)  # kN fallback
