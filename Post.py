@@ -8,8 +8,15 @@ from odbAccess import openOdb
 import displayGroupOdbToolset as dgo
 import os, csv
 import re
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
+if sys.version_info[0] < 3:
+    import Tkinter as tk
+    import tkFileDialog as filedialog
+else:
+    import tkinter as tk
+    from tkinter import filedialog
 
 # =========================
 # USER SETTINGS
@@ -27,6 +34,7 @@ output_images_folder_name = "IMAGES"
 output_thickness_folder_name = "THICKNESS_IMAGES"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
 MIDSPAN_SET = "N-MIDSPAN-BOT"
+SUPPORT_SETS = ["N-SUPPORT-LEFT", "N-SUPPORT-RIGHT"]
 ELSETS = {
     "BF": "E-BF-MIDSPAN",
     "TF": "E-TF-MIDSPAN",
@@ -47,17 +55,14 @@ def safe_get_step(odb):
 def prompt_for_folder(default_folder):
     selected_folder = default_folder
     try:
-        # Abaqus/CAE-safe prompt (avoids Python input/raw_input runtime issues).
-        fields = (("ODB folder", default_folder), )
-        values = getInputs(
-            fields=fields,
-            label="Select folder containing ODB files:",
-            dialogTitle="Abaqus Batch Post Process"
-        )
-        if values and len(values) > 0 and values[0].strip():
-            selected_folder = values[0].strip()
+        root = tk.Tk()
+        root.withdraw()
+        folder = filedialog.askdirectory(initialdir=default_folder, title="Select folder containing ODB files")
+        root.destroy()
+        if folder:
+            selected_folder = folder
     except Exception as e:
-        print(f"[WARNING] Folder prompt unavailable, using default folder. ({e})")
+        print(f"[WARNING] Folder browser unavailable, using default folder. ({e})")
 
     if not os.path.isdir(selected_folder):
         raise ValueError(f"Folder not found: {selected_folder}")
@@ -104,6 +109,22 @@ def get_frame_load_factors(step):
             raw_factors = [v / final_val for v in raw_factors]
 
     return raw_factors
+
+def resolve_support_sets(odb):
+    keys = odb.rootAssembly.nodeSets.keys()
+    resolved = []
+    for name in SUPPORT_SETS:
+        if name in keys:
+            resolved.append(odb.rootAssembly.nodeSets[name])
+            continue
+        matches = [k for k in keys if k.endswith("." + name)]
+        if matches:
+            resolved.append(odb.rootAssembly.nodeSets[matches[0]])
+    if resolved:
+        return resolved
+
+    auto = [odb.rootAssembly.nodeSets[k] for k in keys if "SUPPORT" in k.upper()]
+    return auto
 # -------------------------
 # Curve extraction
 # -------------------------
@@ -111,12 +132,20 @@ def extract_curve_data(step, odb):
     disp, load = [], []
     region = odb.rootAssembly.nodeSets[MIDSPAN_SET]
     load_factors = get_frame_load_factors(step)
+    support_regions = resolve_support_sets(odb)
 
     for frame, lpf in zip(step.frames, load_factors):
         u = frame.fieldOutputs["U"].getSubset(region=region)
         u2 = max([abs(v.data[1]) for v in u.values])
         disp.append(u2)
-        load.append(lpf * target_load)  # kN
+        if "RF" in frame.fieldOutputs and support_regions:
+            total_rf2 = 0.0
+            for sreg in support_regions:
+                rf = frame.fieldOutputs["RF"].getSubset(region=sreg)
+                total_rf2 += sum(v.data[1] for v in rf.values)
+            load.append(abs(total_rf2) / 1000.0)  # kN from RF2 (N)
+        else:
+            load.append(lpf * target_load)  # kN fallback
     return np.array(disp), np.array(load)
 
 # -------------------------
@@ -135,13 +164,12 @@ def compute_stiffness(disp, load):
 # First yield detection
 # -------------------------
 def detect_first_yield(step):
-    load_factors = get_frame_load_factors(step)
-    for frame, lpf in zip(step.frames, load_factors):
+    for idx, frame in enumerate(step.frames):
         if "PEEQ" not in frame.fieldOutputs:
             continue
         peeq = frame.fieldOutputs["PEEQ"]
         if any(v.data > peeq_threshold for v in peeq.values):
-            return lpf
+            return idx
     return None
 
 # -------------------------
@@ -294,8 +322,9 @@ def process_odb(odb_file, output_curves_folder):
     peak_load = float(np.max(load))
     peak_idx = int(np.argmax(load))
     peak_lpf = load_factors[peak_idx]
-    yield_lpf = detect_first_yield(step)
-    yield_load = yield_lpf * target_load if yield_lpf else None
+    yield_idx = detect_first_yield(step)
+    yield_lpf = load_factors[yield_idx] if yield_idx is not None else None
+    yield_load = float(load[yield_idx]) if yield_idx is not None else None
     stiffness = compute_stiffness(disp, load)
     energy = compute_energy(disp, load)
     max_stress, max_peeq, failure_zone = extract_local_metrics(step, odb)
