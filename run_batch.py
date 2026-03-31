@@ -1,26 +1,51 @@
 import os
 import subprocess
+import tkinter as tk
+from tkinter import filedialog
 
 # =========================
 # USER SETTINGS
 # =========================
-folder_path = r"C:\Users\borism\Desktop\Claude Inp file"  # your folder
 ABAQUS_CMD = r"C:\SIMULIA\Commands\abaqus.bat"
 
 cpus = 4
 memory = "90%"
 run_in_background = False  # False = sequential (recommended)
 
+
 # =========================
 # FUNCTIONS
 # =========================
+def select_input_folder():
+    """Prompt user and open a folder browser to pick the input directory."""
+    user_choice = input("Select input folder using file browser? (Y/n): ").strip().lower()
+
+    if user_choice in ("", "y", "yes"):
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select folder containing .inp files")
+        root.destroy()
+
+        if folder:
+            return folder
+
+        print("No folder selected in browser.")
+
+    folder = input("Enter full folder path with .inp files: ").strip().strip('"')
+    if not folder:
+        raise ValueError("No folder path provided.")
+
+    return folder
+
+
 def is_job_completed(job_name):
     """Check if job already completed successfully"""
     sta_file = job_name + ".sta"
     if not os.path.exists(sta_file):
         return False
 
-    with open(sta_file, 'r') as f:
+    with open(sta_file, "r") as f:
         content = f.read()
         return "COMPLETED SUCCESSFULLY" in content
 
@@ -58,11 +83,16 @@ def run_job(inp_file):
 # =========================
 # MAIN
 # =========================
+folder_path = select_input_folder()
+
+if not os.path.isdir(folder_path):
+    raise FileNotFoundError(f"Folder does not exist: {folder_path}")
+
 os.chdir(folder_path)
 
 inp_files = [f for f in os.listdir(folder_path) if f.endswith(".inp")]
 
-print(f"Found {len(inp_files)} .inp files\n")
+print(f"Found {len(inp_files)} .inp files in: {folder_path}\n")
 
 for inp in inp_files:
     run_job(inp)
