@@ -301,6 +301,8 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
       <button class="ctab"     onclick="setCT('pitting')">Pitting</button>
       <button class="ctab"     onclick="setCT('girder')">Web/Flange</button>
       <button class="ctab"     onclick="setCT('zone')">Zone</button>
+      <button class="ctab"     onclick="setCT('fullwall')">Full Wall Loss</button>
+      <button class="ctab"     onclick="setCT('random')">Random</button>
       <button class="ctab"     onclick="setCT('custom')">Custom</button>
     </div>
 
@@ -455,6 +457,30 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
         <div class="fld"><label>Loss outside zone (mm)</label><input type="number" id="zout" value="0.5" step="0.25" min="0"></div>
       </div>
       <button class="btn bout bfull" onclick="addZone()">+ Add Zone Profile</button>
+    </div>
+
+    <!-- Full Wall Loss -->
+    <div class="cconf" id="cf-fullwall">
+      <div class="hint">Creates a severe profile representing <b>full wall loss</b> across all faces. In shell models, near-zero residual thickness is used for numerical stability.</div>
+      <div class="row r1">
+        <div class="fld"><label>Profile name</label><input type="text" id="fwnm" value="FULL_WALL"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addFullWall()">+ Add Full Wall Loss</button>
+    </div>
+
+    <!-- Random -->
+    <div class="cconf" id="cf-random">
+      <div class="hint">Random longitudinal corrosion: seeded pseudo-random loss between Min→Max, smoothed by moving average. Reproducible with the same seed.</div>
+      <div class="row r2">
+        <div class="fld"><label>Min loss (mm)</label><input type="number" id="rmin" value="0.3" step="0.1" min="0"></div>
+        <div class="fld"><label>Max loss (mm)</label><input type="number" id="rmax" value="3.0" step="0.1" min="0"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Seed</label><input type="number" id="rseed" value="42" step="1"></div>
+        <div class="fld"><label>Smoothing (pts)</label><input type="number" id="rsmooth" value="7" step="2" min="1"></div>
+      </div>
+      <div class="row r1"><div class="fld"><label>Profile name</label><input type="text" id="rname" placeholder="e.g. RAND_A"></div></div>
+      <button class="btn bout bfull" onclick="addRandom()">+ Add Random Profile</button>
     </div>
 
     <!-- Custom -->
@@ -663,7 +689,7 @@ function setBend(m) {
 }
 
 function setCT(t) {
-  var tabs = ['uniform','pitting','girder','zone','custom'];
+  var tabs = ['uniform','pitting','girder','zone','fullwall','random','custom'];
   document.querySelectorAll('.ctab').forEach(function(b,i) { b.classList.toggle('act', tabs[i]===t); });
   document.querySelectorAll('.cconf').forEach(function(c) { c.classList.remove('act'); });
   document.getElementById('cf-'+t).classList.add('act');
@@ -721,6 +747,13 @@ function drawXS() {
 function getLoss(prof, xFrac, zone) {
   if (!prof) return 0;
   var p = getP(), xMm = xFrac * p.L;
+  function randomLossAt(pr, xf) {
+    if (!pr.losses || !pr.losses.length) return 0;
+    var n = pr.losses.length;
+    var pos = Math.max(0, Math.min(n-1, xf*(n-1)));
+    var i0 = Math.floor(pos), i1 = Math.min(n-1, i0+1), t = pos - i0;
+    return pr.losses[i0]*(1-t) + pr.losses[i1]*t;
+  }
   switch (prof.type) {
     case 'uniform': return prof.loss;
     case 'pitting': {
@@ -736,6 +769,12 @@ function getLoss(prof, xFrac, zone) {
       return 0;
     case 'zone':
       return (xMm>=prof.x1 && xMm<=prof.x2) ? prof.inL : prof.outL;
+    case 'fullwall':
+      if (zone==='web') return p.tw;
+      if (zone==='tf' || zone==='bf') return p.tf;
+      return Math.max(p.tf, p.tw);
+    case 'random':
+      return randomLossAt(prof, xFrac);
     case 'custom':
       if (zone==='tf')  return prof.tfL;
       if (zone==='web') return prof.wL;
@@ -887,6 +926,32 @@ function addZone() {
     desc:'Zone x=['+x1+','+x2+'] mm inside='+inL+' mm outside='+outL+' mm'});
   refresh();
 }
+function addFullWall() {
+  var nm=(gs('fwnm').trim()||'FULL_WALL').replace(/\s+/g,'_');
+  profiles.push({type:'fullwall',label:nm,desc:'Full wall loss (all faces, full span)'});
+  refresh();
+}
+function addRandom() {
+  var minL=gv('rmin'), maxL=gv('rmax');
+  if (maxL < minL) { var t=minL; minL=maxL; maxL=t; }
+  var seed=Math.round(gv('rseed'));
+  var smooth=Math.max(1,Math.round(gv('rsmooth')));
+  if (smooth%2===0) smooth += 1;
+  var n=241, losses=[], base=[];
+  var s=(seed>>>0) || 1;
+  function rnd(){ s=(1664525*s + 1013904223)>>>0; return s/4294967296; }
+  for (var i=0;i<n;i++) base.push(minL + (maxL-minL)*rnd());
+  var half=Math.floor(smooth/2);
+  for (var j=0;j<n;j++) {
+    var sum=0, cnt=0;
+    for (var k=Math.max(0,j-half); k<=Math.min(n-1,j+half); k++) { sum += base[k]; cnt++; }
+    losses.push(parseFloat((sum/cnt).toFixed(4)));
+  }
+  var nm=(gs('rname').trim()||('RAND_S'+seed)).replace(/\s+/g,'_');
+  profiles.push({type:'random',minL:minL,maxL:maxL,seed:seed,smooth:smooth,losses:losses,
+    label:nm,desc:'Random longitudinal loss ['+minL+','+maxL+'] mm, seed='+seed+', smooth='+smooth});
+  refresh();
+}
 function addCustom() {
   var nm=gs('cnm').trim()||('CUST_'+profiles.length),tf=gv('ctf'),w=gv('cw'),bf=gv('cbf');
   profiles.push({type:'custom',tfL:tf,wL:w,bfL:bf,label:nm,
@@ -912,7 +977,7 @@ function clearAll() {
 }
 function refresh() {
   var el=document.getElementById('plist');
-  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',custom:'CST'};
+  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',fullwall:'FWL',random:'RND',custom:'CST'};
   el.innerHTML = profiles.length
     ? profiles.map(function(p,i){
         return '<div class="pitem'+(i===selIdx?' sel':'')+'" onclick="selProf('+i+')">'
@@ -938,20 +1003,21 @@ function chunkList(ids, n) {
 }
 
 /*
- * Compute per-element effective thicknesses for a zone profile.
- * Returns an object with arrays:
- *   webT[xi]  – effective web thickness at longitudinal column xi
- *   tfT[xi]   – effective TF thickness
- *   bfT[xi]   – effective BF thickness
- * For non-zone profiles a single global thickness is used instead.
+ * Compute per-element effective thicknesses for longitudinally varying profiles.
+ * Returns null for profiles with globally uniform thickness.
  */
-function zoneThicknesses(prof, p, nx, xs) {
+function profileThicknesses(prof, p, nx, xs) {
+  if (!(prof.type==='zone' || prof.type==='random')) return null;
   var result={webT:[],tfT:[],bfT:[]};
   for (var xi=0;xi<nx;xi++) {
-    // Element centre x = midpoint of column xi
     var xc = (xs[xi]+xs[xi+1])/2;
-    var inside = (xc>=prof.x1 && xc<=prof.x2);
-    var loss = inside ? prof.inL : prof.outL;
+    var xFrac = p.L>0 ? (xc/p.L) : 0;
+    var loss = 0;
+    if (prof.type==='zone') {
+      loss = (xc>=prof.x1 && xc<=prof.x2) ? prof.inL : prof.outL;
+    } else if (prof.type==='random') {
+      loss = getLoss(prof, xFrac, 'web');
+    }
     result.webT.push(Math.max(0.5, p.tw - loss));
     result.tfT.push(Math.max(0.5, p.tf - loss));
     result.bfT.push(Math.max(0.5, p.tf - loss));
@@ -1084,12 +1150,12 @@ function makeINP(prof, p, idx) {
 
   // ── Shell thicknesses ──────────────────────────────────────────────────────
   //
-  // For zone profiles we assign a separate *Shell Section per longitudinal
+  // For longitudinally varying profiles we assign a separate *Shell Section per longitudinal
   // column of elements so that thickness varies correctly along the beam.
   // For all other profiles a single global thickness per face is sufficient.
 
-  var isZone = (prof.type === 'zone');
-  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : null;
+  var vt = profileThicknesses(prof, p, nx, xs);
+  var isVariableProfile = !!vt;
 
   // Global effective thicknesses (used for non-zone profiles and header comments)
   var etf, etw, ebf;
@@ -1106,6 +1172,11 @@ function makeINP(prof, p, idx) {
   } else if (prof.type==='zone') {
     // Report worst-case (inside zone) in header
     etf=Math.max(0.5,p.tf-prof.inL); etw=Math.max(0.5,p.tw-prof.inL); ebf=etf;
+  } else if (prof.type==='fullwall') {
+    etf=0.5; etw=0.5; ebf=0.5;
+  } else if (prof.type==='random') {
+    var rMax = Math.max.apply(null, prof.losses || [0]);
+    etf=Math.max(0.5,p.tf-rMax); etw=Math.max(0.5,p.tw-rMax); ebf=Math.max(0.5,p.tf-rMax);
   } else { // custom
     etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
   }
@@ -1155,8 +1226,11 @@ function makeINP(prof, p, idx) {
   w('**   d='+p.d+' mm   b='+p.b+' mm   tf='+p.tf+' mm   tw='+p.tw+' mm   L='+p.L+' mm');
   w('**');
   w('** CORROSION PROFILE : '+(prof.desc||prof.label));
-  if (isZone) {
+  if (prof.type==='zone') {
     w('** Zone x=['+prof.x1+','+prof.x2+'] mm  loss_inside='+prof.inL+' mm  loss_outside='+prof.outL+' mm');
+    w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
+  } else if (prof.type==='random') {
+    w('** Random longitudinal profile: seed='+prof.seed+'  loss range=['+prof.minL+','+prof.maxL+'] mm  smooth='+prof.smooth+' pts');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
@@ -1206,16 +1280,18 @@ function makeINP(prof, p, idx) {
   w('** Elements are grouped into longitudinal columns.');
   w('** Each column is assigned its own *Shell Section so that');
   w('** thickness reflects the local corrosion level at that position.');
-  if (isZone) {
+  if (prof.type==='zone') {
     w('** Zone profile: inside=['+prof.x1+','+prof.x2+'] mm loss='+prof.inL+' mm  outside loss='+prof.outL+' mm');
+  } else if (prof.type==='random') {
+    w('** Random profile: seed='+prof.seed+'  range=['+prof.minL+','+prof.maxL+'] mm  smooth='+prof.smooth+' pts');
   } else {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
   for (var xi=0;xi<nx;xi++) {
     var colLabel='COL-'+String(xi+1).padStart(3,'0');
     var twEff, tfEff, bfEff;
-    if (isZone) {
-      twEff = zt.webT[xi]; tfEff = zt.tfT[xi]; bfEff = zt.bfT[xi];
+    if (isVariableProfile) {
+      twEff = vt.webT[xi]; tfEff = vt.tfT[xi]; bfEff = vt.bfT[xi];
     } else {
       twEff = etw; tfEff = etf; bfEff = ebf;
     }
@@ -1370,8 +1446,10 @@ function makeINP(prof, p, idx) {
   w('**   First yield  │ ___  │ ___     │ ___');
   w('**   Peak load    │ ___  │ ___     │ ___');
   w('**   ─────────────────────────────────────────────');
-  if (isZone) {
+  if (prof.type==='zone') {
     w('**   Zone: x=['+prof.x1+','+prof.x2+'] mm  loss_in='+prof.inL+' mm  loss_out='+prof.outL+' mm');
+  } else if (prof.type==='random') {
+    w('**   Random: seed='+prof.seed+'  min='+prof.minL+' mm  max='+prof.maxL+' mm  smooth='+prof.smooth+' pts');
   } else {
     w('**   Corrosion: TF='+(p.tf-etf).toFixed(3)+' mm  WEB='+(p.tw-etw).toFixed(3)+' mm  BF='+(p.tf-ebf).toFixed(3)+' mm');
   }
