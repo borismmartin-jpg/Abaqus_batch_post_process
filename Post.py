@@ -36,7 +36,12 @@ def select_odb_folder(default_folder):
       - Ask for manual path.
       - If blank, use default folder from USER SETTINGS.
     """
-    folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
+    try:
+        folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
+    except Exception as e:
+        print("[WARN] input() unavailable in this Abaqus session: {}".format(e))
+        print("[INFO] Using default folder_path: {}".format(default_folder))
+        return default_folder
     if folder:
         return folder
     return default_folder

@@ -21,7 +21,12 @@ def select_input_folder(default_folder):
     """
     Prompt for input directory path; press Enter to use configured default.
     """
-    folder = input("Enter full folder path with .inp files (press Enter to use default): ").strip().strip('"')
+    try:
+        folder = input("Enter full folder path with .inp files (press Enter to use default): ").strip().strip('"')
+    except Exception as e:
+        print("[WARN] input() unavailable in this Abaqus session: {}".format(e))
+        print("[INFO] Using default input folder: {}".format(default_folder))
+        return default_folder
     if folder:
         return folder
     return default_folder
