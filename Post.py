@@ -13,7 +13,7 @@ APP_VERSION = "1.0.0"
 # =========================
 # USER SETTINGS
 # =========================
-folder_path = r"C:\Users\borism\Desktop\Claude Inp file"
+folder_path = r"C:\Users"
 step_name = "Load-to-Failure"
 target_load = 350000.0   # N
 peeq_threshold = 1e-6
