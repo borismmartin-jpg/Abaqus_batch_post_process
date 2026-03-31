@@ -9,6 +9,7 @@ import displayGroupOdbToolset as dgo
 import os, csv
 import re
 import numpy as np
+import matplotlib.pyplot as plt
 
 # =========================
 # USER SETTINGS
@@ -20,6 +21,7 @@ peeq_threshold = 1e-6
 output_root_folder_name = "POST_OUTPUT"
 output_summary_name = "SUMMARY_RESULTS.csv"
 output_elset_check_name = "ELSET_CHECK.csv"
+output_combined_curve_name = "LOAD_DISP_ALL.png"
 output_curves_folder_name = "CURVES"
 output_images_folder_name = "IMAGES"
 output_thickness_folder_name = "THICKNESS_IMAGES"
@@ -286,9 +288,12 @@ def process_odb(odb_file, output_curves_folder):
     step = safe_get_step(odb)
 
     # Curve
+    load_factors = get_frame_load_factors(step)
     disp, load = extract_curve_data(step, odb)
     max_disp = float(np.max(disp))
     peak_load = float(np.max(load))
+    peak_idx = int(np.argmax(load))
+    peak_lpf = load_factors[peak_idx]
     yield_lpf = detect_first_yield(step)
     yield_load = yield_lpf * target_load if yield_lpf else None
     stiffness = compute_stiffness(disp, load)
@@ -304,7 +309,7 @@ def process_odb(odb_file, output_curves_folder):
         writer.writerow(["Disp (mm)", "Load (kN)"])
         for d,l in zip(disp,load): writer.writerow([d, l])
 
-    return {
+    summary = {
         "Job": job_name,
         "Yield Load (kN)": yield_load,
         "Peak Load (kN)": peak_load,
@@ -315,6 +320,49 @@ def process_odb(odb_file, output_curves_folder):
         "Max PEEQ": max_peeq,
         "Failure Zone": failure_zone
     }
+    curve_payload = {
+        "Job": job_name,
+        "disp": disp,
+        "load": load,
+        "yield_lpf": yield_lpf,
+        "peak_lpf": peak_lpf
+    }
+    return summary, curve_payload
+
+def export_combined_curve_plot(curve_payloads, output_root):
+    if not curve_payloads:
+        return
+
+    plt.figure(figsize=(10, 7))
+    for c in curve_payloads:
+        plt.plot(c["disp"], c["load"], linewidth=1.8, label=c["Job"])
+    plt.xlabel("Displacement (mm)")
+    plt.ylabel("Load (kN)")
+    plt.title("Load-Displacement Curves")
+    plt.grid(True, linestyle="--", alpha=0.35)
+    plt.legend(fontsize=8)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_root, output_combined_curve_name), dpi=200)
+    plt.close()
+
+def export_named_stress_image(odb_path, target_lpf, output_images_folder, label):
+    job_name = os.path.basename(odb_path).replace(".odb", "")
+    odb = openOdb(path=odb_path)
+    step = safe_get_step(odb)
+
+    vp = session.Viewport(name=f'VP_{job_name}_{label}', origin=(0, 0), width=200, height=150)
+    vp.setValues(displayedObject=odb)
+
+    frame = find_closest_frame(step, target_lpf)
+    vp.odbDisplay.setFrame(step=step.name, frame=frame.incrementNumber)
+    vp.odbDisplay.setPrimaryVariable(variableLabel='S', outputPosition=INTEGRATION_POINT,
+                                     refinement=(INVARIANT, 'Mises'))
+    vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
+    vp.view.fitView()
+
+    file_path = os.path.join(output_images_folder, f"{job_name}_{label}.png")
+    session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
+    odb.close()
 
 # =========================
 # ======== MAIN ===========
@@ -322,15 +370,19 @@ def process_odb(odb_file, output_curves_folder):
 selected_folder = prompt_for_folder(folder_path)
 os.chdir(selected_folder)
 output_summary, output_elset_check, output_curves_folder, output_images_folder, output_thickness_folder = setup_output_paths(selected_folder)
+output_root = os.path.join(selected_folder, output_root_folder_name)
 odb_files = [f for f in os.listdir() if f.endswith(".odb")]
 
 # -------------------------
 # PROCESSING
 # -------------------------
 results = []
+curve_payloads = []
 for odb_file in odb_files:
     try:
-        results.append(process_odb(odb_file, output_curves_folder))
+        summary, curve_payload = process_odb(odb_file, output_curves_folder)
+        results.append(summary)
+        curve_payloads.append(curve_payload)
     except Exception as e:
         print(f"[ERROR] {odb_file}: {e}")
 
@@ -355,10 +407,27 @@ for odb_file in odb_files:
         except Exception as e:
             print(f"[ERROR IMAGE] {odb_file}: {e}")
 
+for c in curve_payloads:
+    odb_name = f'{c["Job"]}.odb'
+    if c["yield_lpf"] is not None:
+        try:
+            export_named_stress_image(odb_name, c["yield_lpf"], output_images_folder, "FIRST_YIELD")
+        except Exception as e:
+            print(f"[ERROR FIRST YIELD IMAGE] {odb_name}: {e}")
+    try:
+        export_named_stress_image(odb_name, c["peak_lpf"], output_images_folder, "MAX_LOAD")
+    except Exception as e:
+        print(f"[ERROR MAX LOAD IMAGE] {odb_name}: {e}")
+
 for odb_file in odb_files:
     try:
         export_thickness_image(odb_file, output_thickness_folder, output_elset_check)
     except Exception as e:
         print(f"[ERROR THICKNESS IMAGE] {odb_file}: {e}")
+
+try:
+    export_combined_curve_plot(curve_payloads, output_root)
+except Exception as e:
+    print(f"[ERROR CURVE PLOT] {e}")
 
 print("\n[OK] Images exported")
