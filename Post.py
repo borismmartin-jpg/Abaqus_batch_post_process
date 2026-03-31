@@ -6,7 +6,8 @@ from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
 import os, csv
-import sys
+import tkinter as tk
+from tkinter import filedialog
 import numpy as np
 
 APP_VERSION = "2.0.0-wip"
@@ -31,55 +32,29 @@ ELSETS = {
 }
 
 
-def resolve_odb_folder(default_path):
+def select_odb_folder(default_folder):
     """
-    Resolve ODB folder path.
-
-    Priority:
-      1) command-line arg: --folder=<path> or folder=<path>
-      2) environment var: ABAQUS_POST_FOLDER
-      3) interactive prompt (if terminal is available)
-      4) configured default_path in USER SETTINGS
+    Same folder-selection flow as run_batch.py:
+      - Ask whether to use file browser.
+      - If user skips browser or cancels, allow manual path entry.
+      - If blank manual entry, fall back to default folder from USER SETTINGS.
     """
-    def prompt_text(message):
-        try:
-            return raw_input(message)  # Python 2 (Abaqus legacy)
-        except NameError:
-            return input(message)      # Python 3
+    user_choice = input("Select ODB folder using file browser? (Y/n): ").strip().lower()
 
-    folder_from_cli = None
-    for arg in sys.argv[1:]:
-        if arg.startswith("--folder="):
-            folder_from_cli = arg.split("=", 1)[1].strip().strip('"')
-            break
-        if arg.startswith("folder="):
-            folder_from_cli = arg.split("=", 1)[1].strip().strip('"')
-            break
+    if user_choice in ("", "y", "yes"):
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select folder containing .odb files")
+        root.destroy()
+        if folder:
+            return folder
+        print("No folder selected in browser.")
 
-    folder_from_env = os.environ.get("ABAQUS_POST_FOLDER", "").strip().strip('"')
-    if folder_from_cli:
-        resolved = folder_from_cli
-    elif folder_from_env:
-        resolved = folder_from_env
-    elif sys.stdin and sys.stdin.isatty():
-        print("\n[INPUT] ODB folder selection")
-        print("Default folder_path: {}".format(default_path))
-        typed = prompt_text("Enter folder path containing .odb files (press Enter to use default): ")
-        typed = typed.strip().strip('"')
-        resolved = typed if typed else default_path
-    else:
-        resolved = default_path
-
-    if folder_from_cli:
-        print("[INFO] Using ODB folder from CLI: {}".format(resolved))
-    elif folder_from_env:
-        print("[INFO] Using ODB folder from ABAQUS_POST_FOLDER: {}".format(resolved))
-    else:
-        print("[INFO] Using default ODB folder_path: {}".format(resolved))
-
-    if not os.path.isdir(resolved):
-        raise FileNotFoundError("Folder does not exist: {}".format(resolved))
-    return resolved
+    folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
+    if folder:
+        return folder
+    return default_folder
 
 # =========================
 # ======== FUNCTIONS ======
@@ -283,7 +258,7 @@ def process_odb(odb_file):
 # =========================
 # ======== MAIN ===========
 # =========================
-folder_path = resolve_odb_folder(folder_path)
+folder_path = select_odb_folder(folder_path)
 if not os.path.isdir(folder_path):
     raise FileNotFoundError(f"Folder does not exist: {folder_path}")
 
