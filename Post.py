@@ -82,17 +82,38 @@ def safe_get_step(odb):
 def extract_curve_data(step, odb):
     disp, load = [], []
     disp_region = odb.rootAssembly.nodeSets[MIDSPAN_SET]
-    rf_region = odb.rootAssembly.nodeSets[SUPPORT_SET]
+    node_sets = odb.rootAssembly.nodeSets
+
+    if SUPPORT_SET in node_sets.keys():
+        rf_regions = [node_sets[SUPPORT_SET]]
+        rf_scale = NUM_SUPPORTS
+    else:
+        support_like = sorted([k for k in node_sets.keys() if "SUPPORT" in k.upper()])
+        rp_like = sorted([k for k in node_sets.keys() if "RP" in k.upper()])
+        fallback_names = support_like if support_like else rp_like
+        if not fallback_names:
+            raise KeyError(
+                "Support node set '{}' not found. Available node sets: {}".format(
+                    SUPPORT_SET, ", ".join(sorted(node_sets.keys()))
+                )
+            )
+        print("[WARN] '{}' not found. Using support-like sets: {} (no extra scaling).".format(
+            SUPPORT_SET, ", ".join(fallback_names)
+        ))
+        rf_regions = [node_sets[name] for name in fallback_names]
+        rf_scale = 1.0
 
     for frame in step.frames:
         u = frame.fieldOutputs["U"].getSubset(region=disp_region)
-        rf = frame.fieldOutputs["RF"].getSubset(region=rf_region)
+        rf2 = 0.0
+        for rf_region in rf_regions:
+            rf = frame.fieldOutputs["RF"].getSubset(region=rf_region)
+            rf2 += sum([v.data[1] for v in rf.values])
 
         u2 = max([abs(v.data[1]) for v in u.values])
-        rf2 = sum([v.data[1] for v in rf.values])
 
         disp.append(u2)
-        load.append(abs(rf2) * NUM_SUPPORTS)
+        load.append(abs(rf2) * rf_scale)
     return np.array(disp), np.array(load)
 
 # -------------------------
