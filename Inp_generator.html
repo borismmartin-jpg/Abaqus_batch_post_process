@@ -461,23 +461,48 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
 
     <!-- Full Wall Loss -->
     <div class="cconf" id="cf-fullwall">
-      <div class="hint">Creates a severe profile representing <b>full wall loss</b> across all faces. In shell models, near-zero residual thickness is used for numerical stability.</div>
-      <div class="row r1">
-        <div class="fld"><label>Profile name</label><input type="text" id="fwnm" value="FULL_WALL"></div>
+      <div class="hint">Creates a severe <b>local full-wall-loss zone</b> (not whole span). Inside the zone, selected faces are reduced to near-zero residual shell thickness for stability.</div>
+      <div class="row r2">
+        <div class="fld"><label>Zone start x1 (mm)</label><input type="number" id="fwx1" value="700" step="50"></div>
+        <div class="fld"><label>Zone end x2 (mm)</label><input type="number" id="fwx2" value="1200" step="50"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Apply to</label>
+          <select id="fwloc">
+            <option value="all">All faces</option>
+            <option value="web">Web only</option>
+            <option value="flanges">Flanges only</option>
+          </select>
+        </div>
+        <div class="fld"><label>Profile name</label><input type="text" id="fwnm" value="FULL_WALL_ZONE"></div>
       </div>
       <button class="btn bout bfull" onclick="addFullWall()">+ Add Full Wall Loss</button>
     </div>
 
     <!-- Random -->
     <div class="cconf" id="cf-random">
-      <div class="hint">Random longitudinal corrosion: seeded pseudo-random loss between Min→Max, smoothed by moving average. Reproducible with the same seed.</div>
+      <div class="hint">Random pitting-style corrosion with varying pit diameters and depths. Pits are randomly placed in a zone, then converted to local equivalent thickness loss by face.</div>
       <div class="row r2">
-        <div class="fld"><label>Min loss (mm)</label><input type="number" id="rmin" value="0.3" step="0.1" min="0"></div>
-        <div class="fld"><label>Max loss (mm)</label><input type="number" id="rmax" value="3.0" step="0.1" min="0"></div>
+        <div class="fld"><label>Zone start x1 (mm)</label><input type="number" id="rx1" value="500" step="50"></div>
+        <div class="fld"><label>Zone end x2 (mm)</label><input type="number" id="rx2" value="1500" step="50"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label># Pits</label><input type="number" id="rnpit" value="45" step="1" min="1"></div>
+        <div class="fld"><label>Apply to</label>
+          <select id="rloc">
+            <option value="all">All faces</option>
+            <option value="web">Web only</option>
+            <option value="flanges">Flanges only</option>
+          </select>
+        </div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Dia min/max (mm)</label><input type="text" id="rdia" value="8,30"></div>
+        <div class="fld"><label>Depth min/max (mm)</label><input type="text" id="rdep" value="0.6,3.2"></div>
       </div>
       <div class="row r2">
         <div class="fld"><label>Seed</label><input type="number" id="rseed" value="42" step="1"></div>
-        <div class="fld"><label>Smoothing (pts)</label><input type="number" id="rsmooth" value="7" step="2" min="1"></div>
+        <div class="fld"><label>Smoothing (pts)</label><input type="number" id="rsmooth" value="5" step="2" min="1"></div>
       </div>
       <div class="row r1"><div class="fld"><label>Profile name</label><input type="text" id="rname" placeholder="e.g. RAND_A"></div></div>
       <button class="btn bout bfull" onclick="addRandom()">+ Add Random Profile</button>
@@ -747,12 +772,12 @@ function drawXS() {
 function getLoss(prof, xFrac, zone) {
   if (!prof) return 0;
   var p = getP(), xMm = xFrac * p.L;
-  function randomLossAt(pr, xf) {
-    if (!pr.losses || !pr.losses.length) return 0;
-    var n = pr.losses.length;
+  function randomLossAt(arr, xf) {
+    if (!arr || !arr.length) return 0;
+    var n = arr.length;
     var pos = Math.max(0, Math.min(n-1, xf*(n-1)));
     var i0 = Math.floor(pos), i1 = Math.min(n-1, i0+1), t = pos - i0;
-    return pr.losses[i0]*(1-t) + pr.losses[i1]*t;
+    return arr[i0]*(1-t) + arr[i1]*t;
   }
   switch (prof.type) {
     case 'uniform': return prof.loss;
@@ -770,11 +795,15 @@ function getLoss(prof, xFrac, zone) {
     case 'zone':
       return (xMm>=prof.x1 && xMm<=prof.x2) ? prof.inL : prof.outL;
     case 'fullwall':
-      if (zone==='web') return p.tw;
-      if (zone==='tf' || zone==='bf') return p.tf;
-      return Math.max(p.tf, p.tw);
+      if (!(xMm>=prof.x1 && xMm<=prof.x2)) return 0;
+      if (zone==='web') return (prof.loc==='web'||prof.loc==='all') ? p.tw : 0;
+      if (zone==='tf' || zone==='bf') return (prof.loc==='flanges'||prof.loc==='all') ? p.tf : 0;
+      return 0;
     case 'random':
-      return randomLossAt(prof, xFrac);
+      if (zone==='web') return randomLossAt(prof.webLoss, xFrac);
+      if (zone==='tf')  return randomLossAt(prof.tfLoss, xFrac);
+      if (zone==='bf')  return randomLossAt(prof.bfLoss, xFrac);
+      return 0;
     case 'custom':
       if (zone==='tf')  return prof.tfL;
       if (zone==='web') return prof.wL;
@@ -840,7 +869,7 @@ function drawMap(prof) {
   ctx.beginPath(); ctx.moveTo(bx,bfY);  ctx.lineTo(ex,bfY);  ctx.stroke();
 
   // Zone boundaries
-  if (prof && prof.type==='zone') {
+  if (prof && (prof.type==='zone' || prof.type==='fullwall' || prof.type==='random') && prof.x1!==undefined && prof.x2!==undefined) {
     var zx1=bx+(prof.x1/p.L)*bLen, zx2=bx+(prof.x2/p.L)*bLen;
     ctx.strokeStyle='rgba(0,229,180,0.5)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
     [zx1,zx2].forEach(function(zx){ ctx.beginPath(); ctx.moveTo(zx,by-2); ctx.lineTo(zx,ey); ctx.stroke(); });
@@ -927,29 +956,80 @@ function addZone() {
   refresh();
 }
 function addFullWall() {
+  var p=getP();
+  var x1=Math.max(0, Math.min(p.L, gv('fwx1')));
+  var x2=Math.max(0, Math.min(p.L, gv('fwx2')));
+  if (x2<x1) { var tx=x1; x1=x2; x2=tx; }
+  var loc=gs('fwloc');
   var nm=(gs('fwnm').trim()||'FULL_WALL').replace(/\s+/g,'_');
-  profiles.push({type:'fullwall',label:nm,desc:'Full wall loss (all faces, full span)'});
+  profiles.push({type:'fullwall',x1:x1,x2:x2,loc:loc,label:nm,
+    desc:'Full wall loss zone x=['+x1+','+x2+'] mm on '+loc});
   refresh();
 }
 function addRandom() {
-  var minL=gv('rmin'), maxL=gv('rmax');
-  if (maxL < minL) { var t=minL; minL=maxL; maxL=t; }
+  var p=getP();
+  var x1=Math.max(0, Math.min(p.L, gv('rx1')));
+  var x2=Math.max(0, Math.min(p.L, gv('rx2')));
+  if (x2<x1) { var tx=x1; x1=x2; x2=tx; }
+  var nPits=Math.max(1,Math.round(gv('rnpit')));
+  var loc=gs('rloc');
+  function parseRange(s, dmin, dmax) {
+    var m=String(s||'').split(',').map(function(v){ return parseFloat(v.trim()); }).filter(function(v){ return !isNaN(v); });
+    var a=(m.length>0?m[0]:dmin), b=(m.length>1?m[1]:dmax);
+    if (b<a) { var t=a; a=b; b=t; }
+    return [a,b];
+  }
+  var dR=parseRange(gs('rdia'),8,30), depR=parseRange(gs('rdep'),0.6,3.2);
+  var dMin=dR[0], dMax=dR[1], depMin=depR[0], depMax=depR[1];
   var seed=Math.round(gv('rseed'));
   var smooth=Math.max(1,Math.round(gv('rsmooth')));
   if (smooth%2===0) smooth += 1;
-  var n=241, losses=[], base=[];
+  var n=241;
+  var webLoss=new Array(n).fill(0), tfLoss=new Array(n).fill(0), bfLoss=new Array(n).fill(0);
+  var pits=[];
   var s=(seed>>>0) || 1;
   function rnd(){ s=(1664525*s + 1013904223)>>>0; return s/4294967296; }
-  for (var i=0;i<n;i++) base.push(minL + (maxL-minL)*rnd());
-  var half=Math.floor(smooth/2);
-  for (var j=0;j<n;j++) {
-    var sum=0, cnt=0;
-    for (var k=Math.max(0,j-half); k<=Math.min(n-1,j+half); k++) { sum += base[k]; cnt++; }
-    losses.push(parseFloat((sum/cnt).toFixed(4)));
+  function addPitToTrace(trace, x0, dia, dep) {
+    var sigma=Math.max(0.8, dia*0.35), xmin=x0-dia*1.8, xmax=x0+dia*1.8;
+    var j0=Math.max(0,Math.floor((xmin/p.L)*(n-1))), j1=Math.min(n-1,Math.ceil((xmax/p.L)*(n-1)));
+    for (var j=j0;j<=j1;j++) {
+      var x=(j/(n-1))*p.L, dx=x-x0;
+      trace[j] += dep*Math.exp(-0.5*Math.pow(dx/sigma,2));
+    }
   }
+  function facePool() {
+    if (loc==='web') return ['web'];
+    if (loc==='flanges') return ['tf','bf'];
+    return ['web','tf','bf'];
+  }
+  var pool=facePool();
+  for (var i=0;i<nPits;i++) {
+    var face=pool[Math.floor(rnd()*pool.length)];
+    var x0=x1 + (x2-x1)*rnd();
+    var dia=dMin + (dMax-dMin)*rnd();
+    var dep=depMin + (depMax-depMin)*rnd();
+    pits.push({face:face,x:x0,dia:dia,dep:dep});
+    if (face==='web') addPitToTrace(webLoss,x0,dia,dep);
+    if (face==='tf')  addPitToTrace(tfLoss, x0,dia,dep);
+    if (face==='bf')  addPitToTrace(bfLoss, x0,dia,dep);
+  }
+  function smoothArr(arr) {
+    var half=Math.floor(smooth/2), out=new Array(arr.length).fill(0);
+    for (var j=0;j<arr.length;j++) {
+      var sum=0,cnt=0;
+      for (var k=Math.max(0,j-half);k<=Math.min(arr.length-1,j+half);k++) { sum+=arr[k]; cnt++; }
+      out[j]=parseFloat((sum/cnt).toFixed(4));
+    }
+    return out;
+  }
+  webLoss=smoothArr(webLoss); tfLoss=smoothArr(tfLoss); bfLoss=smoothArr(bfLoss);
   var nm=(gs('rname').trim()||('RAND_S'+seed)).replace(/\s+/g,'_');
-  profiles.push({type:'random',minL:minL,maxL:maxL,seed:seed,smooth:smooth,losses:losses,
-    label:nm,desc:'Random longitudinal loss ['+minL+','+maxL+'] mm, seed='+seed+', smooth='+smooth});
+  profiles.push({
+    type:'random',x1:x1,x2:x2,seed:seed,smooth:smooth,nPits:nPits,loc:loc,
+    dMin:dMin,dMax:dMax,depMin:depMin,depMax:depMax,pits:pits,
+    webLoss:webLoss,tfLoss:tfLoss,bfLoss:bfLoss,
+    label:nm,desc:'Random pitting zone x=['+x1+','+x2+'] mm pits='+nPits+' dia=['+dMin+','+dMax+'] depth=['+depMin+','+depMax+']'
+  });
   refresh();
 }
 function addCustom() {
@@ -1007,20 +1087,17 @@ function chunkList(ids, n) {
  * Returns null for profiles with globally uniform thickness.
  */
 function profileThicknesses(prof, p, nx, xs) {
-  if (!(prof.type==='zone' || prof.type==='random')) return null;
+  if (!(prof.type==='zone' || prof.type==='random' || prof.type==='fullwall')) return null;
   var result={webT:[],tfT:[],bfT:[]};
   for (var xi=0;xi<nx;xi++) {
     var xc = (xs[xi]+xs[xi+1])/2;
     var xFrac = p.L>0 ? (xc/p.L) : 0;
-    var loss = 0;
-    if (prof.type==='zone') {
-      loss = (xc>=prof.x1 && xc<=prof.x2) ? prof.inL : prof.outL;
-    } else if (prof.type==='random') {
-      loss = getLoss(prof, xFrac, 'web');
-    }
-    result.webT.push(Math.max(0.5, p.tw - loss));
-    result.tfT.push(Math.max(0.5, p.tf - loss));
-    result.bfT.push(Math.max(0.5, p.tf - loss));
+    var webLoss = getLoss(prof, xFrac, 'web');
+    var tfLoss  = getLoss(prof, xFrac, 'tf');
+    var bfLoss  = getLoss(prof, xFrac, 'bf');
+    result.webT.push(Math.max(0.5, p.tw - webLoss));
+    result.tfT.push(Math.max(0.5, p.tf - tfLoss));
+    result.bfT.push(Math.max(0.5, p.tf - bfLoss));
   }
   return result;
 }
@@ -1173,10 +1250,13 @@ function makeINP(prof, p, idx) {
     // Report worst-case (inside zone) in header
     etf=Math.max(0.5,p.tf-prof.inL); etw=Math.max(0.5,p.tw-prof.inL); ebf=etf;
   } else if (prof.type==='fullwall') {
-    etf=0.5; etw=0.5; ebf=0.5;
+    etf=Math.min.apply(null, vt.tfT);
+    etw=Math.min.apply(null, vt.webT);
+    ebf=Math.min.apply(null, vt.bfT);
   } else if (prof.type==='random') {
-    var rMax = Math.max.apply(null, prof.losses || [0]);
-    etf=Math.max(0.5,p.tf-rMax); etw=Math.max(0.5,p.tw-rMax); ebf=Math.max(0.5,p.tf-rMax);
+    etf=Math.min.apply(null, vt.tfT);
+    etw=Math.min.apply(null, vt.webT);
+    ebf=Math.min.apply(null, vt.bfT);
   } else { // custom
     etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
   }
@@ -1229,8 +1309,12 @@ function makeINP(prof, p, idx) {
   if (prof.type==='zone') {
     w('** Zone x=['+prof.x1+','+prof.x2+'] mm  loss_inside='+prof.inL+' mm  loss_outside='+prof.outL+' mm');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
+  } else if (prof.type==='fullwall') {
+    w('** Full-wall-loss zone x=['+prof.x1+','+prof.x2+'] mm  apply_to='+prof.loc);
+    w('** Element-distribution *Shell Section used — local near-zero residual thickness in the zone');
   } else if (prof.type==='random') {
-    w('** Random longitudinal profile: seed='+prof.seed+'  loss range=['+prof.minL+','+prof.maxL+'] mm  smooth='+prof.smooth+' pts');
+    w('** Random pitting zone x=['+prof.x1+','+prof.x2+'] mm  pits='+prof.nPits+'  apply_to='+prof.loc);
+    w('** Pit dia=['+prof.dMin+','+prof.dMax+'] mm  depth=['+prof.depMin+','+prof.depMax+'] mm  seed='+prof.seed+'  smooth='+prof.smooth+' pts');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
@@ -1282,8 +1366,10 @@ function makeINP(prof, p, idx) {
   w('** thickness reflects the local corrosion level at that position.');
   if (prof.type==='zone') {
     w('** Zone profile: inside=['+prof.x1+','+prof.x2+'] mm loss='+prof.inL+' mm  outside loss='+prof.outL+' mm');
+  } else if (prof.type==='fullwall') {
+    w('** Full-wall-loss profile: zone=['+prof.x1+','+prof.x2+'] mm  apply_to='+prof.loc);
   } else if (prof.type==='random') {
-    w('** Random profile: seed='+prof.seed+'  range=['+prof.minL+','+prof.maxL+'] mm  smooth='+prof.smooth+' pts');
+    w('** Random pitting profile: zone=['+prof.x1+','+prof.x2+'] mm  pits='+prof.nPits+'  seed='+prof.seed+'  smooth='+prof.smooth+' pts');
   } else {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
@@ -1448,8 +1534,10 @@ function makeINP(prof, p, idx) {
   w('**   ─────────────────────────────────────────────');
   if (prof.type==='zone') {
     w('**   Zone: x=['+prof.x1+','+prof.x2+'] mm  loss_in='+prof.inL+' mm  loss_out='+prof.outL+' mm');
+  } else if (prof.type==='fullwall') {
+    w('**   Full-wall zone: x=['+prof.x1+','+prof.x2+'] mm  apply_to='+prof.loc);
   } else if (prof.type==='random') {
-    w('**   Random: seed='+prof.seed+'  min='+prof.minL+' mm  max='+prof.maxL+' mm  smooth='+prof.smooth+' pts');
+    w('**   Random pits: x=['+prof.x1+','+prof.x2+'] mm  n='+prof.nPits+'  dia=['+prof.dMin+','+prof.dMax+'] mm  depth=['+prof.depMin+','+prof.depMax+'] mm  seed='+prof.seed);
   } else {
     w('**   Corrosion: TF='+(p.tf-etf).toFixed(3)+' mm  WEB='+(p.tw-etw).toFixed(3)+' mm  BF='+(p.tf-ebf).toFixed(3)+' mm');
   }
