@@ -9,6 +9,7 @@ import os, csv
 import tkinter as tk
 from tkinter import filedialog
 import numpy as np
+import matplotlib.pyplot as plt
 
 APP_VERSION = "2.0.0-wip"
 
@@ -25,7 +26,6 @@ output_combined_curve = "COMBINED_LOAD_DISPLACEMENT.csv"
 output_images_folder = "IMAGES"
 output_thickness_images_folder = "THICKNESS_IMAGES"
 image_modes = ["S_MISES"]
-thickness_image_modes = ["STH"]  # Shell thickness contour images
 MIDSPAN_SET = "N-MIDSPAN-BOT"
 SUPPORT_SET = "N-SUPPORT"
 NUM_SUPPORTS = 2  # If SUPPORT_SET contains one support line, scale RF2 to total test load
@@ -250,6 +250,57 @@ def export_image(odb_path, target_lpf, mode):
         session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
     finally:
         odb.close()
+
+
+def export_initial_thickness_image(odb_path):
+    job_name = os.path.basename(odb_path).replace(".odb", "")
+    odb = openOdb(path=odb_path)
+
+    try:
+        step = safe_get_step(odb)
+        used_step_name = step.name
+        initial_frame = step.frames[0]
+
+        vp_name = f"VP_{job_name}_THICKNESS_INITIAL".replace(".", "p")
+        vp = session.Viewport(name=vp_name, origin=(0,0), width=200, height=150)
+        vp.setValues(displayedObject=odb)
+        vp.odbDisplay.setFrame(step=used_step_name, frame=initial_frame.incrementNumber)
+
+        try:
+            resolved_mode = set_primary_variable(vp, initial_frame, "STH")
+            vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_UNDEF,))
+        except Exception:
+            resolved_mode = "THICKNESS_INITIAL_GEOMETRY"
+            vp.odbDisplay.display.setValues(plotState=(UNDEFORMED,))
+            print(f"[WARN THICKNESS] {job_name}: shell thickness field missing, exported initial geometry only.")
+
+        vp.view.fitView()
+
+        if not os.path.exists(output_thickness_images_folder):
+            os.makedirs(output_thickness_images_folder)
+        file_path = os.path.join(output_thickness_images_folder, f"{job_name}_{resolved_mode}.png")
+        session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
+    finally:
+        odb.close()
+
+
+def export_combined_curve_plot(results, output_plot="COMBINED_LOAD_DISPLACEMENT.png"):
+    plt.figure(figsize=(8, 6))
+    for row in results:
+        disp = row.get("Curve Disp (mm)", [])
+        load = row.get("Curve Load (kN)", [])
+        if disp and load:
+            plt.plot(disp, load, label=row["Job"])
+    plt.xlabel("Displacement (mm)")
+    plt.ylabel("Load (kN)")
+    plt.title("Load-Displacement Curves")
+    plt.grid(True, alpha=0.3)
+    if len(results) <= 12:
+        plt.legend(loc="best", fontsize=8)
+    plt.tight_layout()
+    plt.savefig(output_plot, dpi=200)
+    plt.close()
+    print(f"[OK] Combined load-displacement plot written to {output_plot}")
 # -------------------------
 # Single ODB processing
 # -------------------------
@@ -336,6 +387,7 @@ for odb_file in odb_files:
 # -------------------------
 if results:
     export_combined_curve(results)
+    export_combined_curve_plot(results)
     cleaned_results = []
     for row in results:
         reduced = dict(row)
@@ -367,24 +419,10 @@ for odb_file in odb_files:
                 print(f"[ERROR IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
 
 # Thickness images in a dedicated folder
-if not os.path.exists(output_thickness_images_folder):
-    os.makedirs(output_thickness_images_folder)
-
-original_images_folder = output_images_folder
-output_images_folder = output_thickness_images_folder
 for odb_file in odb_files:
-    odb_result = next((r for r in results if r["Job"] == odb_file.replace(".odb", "")), None)
-    if not odb_result:
-        continue
-    thickness_targets = [odb_result["Peak Load LPF"]]
-    if odb_result["Yield LPF"] is not None:
-        thickness_targets = [odb_result["Yield LPF"], odb_result["Peak Load LPF"]]
-    for mode in thickness_image_modes:
-        for lpf in thickness_targets:
-            try:
-                export_image(odb_file, lpf, mode)
-            except Exception as e:
-                print(f"[ERROR THICKNESS IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
-output_images_folder = original_images_folder
+    try:
+        export_initial_thickness_image(odb_file)
+    except Exception as e:
+        print(f"[ERROR THICKNESS IMAGE] {odb_file}: {e}")
 
 print("\n[OK] Images exported")
