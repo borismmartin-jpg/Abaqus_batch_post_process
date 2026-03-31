@@ -29,6 +29,16 @@ ELSETS = {
     "WEB": "E-WEB-LOADPT"
 }
 
+
+def resolve_odb_folder(default_path):
+    """
+    Prompt user for ODB folder path; press Enter to keep configured default.
+    """
+    print("\n[INPUT] ODB folder selection")
+    print(f"Default folder_path: {default_path}")
+    user_path = input("Enter folder path containing .odb files (press Enter to use default): ").strip().strip('"')
+    return user_path if user_path else default_path
+
 # =========================
 # ======== FUNCTIONS ======
 # =========================
@@ -231,8 +241,13 @@ def process_odb(odb_file):
 # =========================
 # ======== MAIN ===========
 # =========================
+folder_path = resolve_odb_folder(folder_path)
+if not os.path.isdir(folder_path):
+    raise FileNotFoundError(f"Folder does not exist: {folder_path}")
+
 os.chdir(folder_path)
 odb_files = [f for f in os.listdir() if f.endswith(".odb")]
+print(f"[INFO] Found {len(odb_files)} ODB files in: {folder_path}")
 
 # -------------------------
 # PROCESSING
