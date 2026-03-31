@@ -6,6 +6,8 @@ from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
 import os, csv
+import tkinter as tk
+from tkinter import filedialog
 import numpy as np
 
 APP_VERSION = "2.0.0-wip"
@@ -32,29 +34,32 @@ ELSETS = {
 
 def select_odb_folder(default_folder):
     """
-    Folder-selection flow for Abaqus script run:
-      - Ask for manual path.
-      - If blank, use default folder from USER SETTINGS.
+    Select ODB folder with a GUI picker when possible.
+    Falls back to default/current directory in non-GUI sessions.
     """
     try:
-        folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select folder containing .odb files")
+        root.destroy()
+        if folder:
+            return folder
     except Exception as e:
-        print("[WARN] input() unavailable in this Abaqus session: {}".format(e))
-        cwd = os.getcwd()
-        default_has_odb = os.path.isdir(default_folder) and any(f.endswith(".odb") for f in os.listdir(default_folder))
-        cwd_has_odb = os.path.isdir(cwd) and any(f.endswith(".odb") for f in os.listdir(cwd))
+        print("[WARN] Folder picker unavailable in this Abaqus session: {}".format(e))
 
-        if default_has_odb:
-            print("[INFO] Using default folder_path: {}".format(default_folder))
-            return default_folder
-        if cwd_has_odb:
-            print("[INFO] Default folder has no ODB files; using current directory: {}".format(cwd))
-            return cwd
+    cwd = os.getcwd()
+    default_has_odb = os.path.isdir(default_folder) and any(f.endswith(".odb") for f in os.listdir(default_folder))
+    cwd_has_odb = os.path.isdir(cwd) and any(f.endswith(".odb") for f in os.listdir(cwd))
 
+    if default_has_odb:
         print("[INFO] Using default folder_path: {}".format(default_folder))
         return default_folder
-    if folder:
-        return folder
+    if cwd_has_odb:
+        print("[INFO] Default folder has no ODB files; using current directory: {}".format(cwd))
+        return cwd
+
+    print("[INFO] Using default folder_path: {}".format(default_folder))
     return default_folder
 
 # =========================
