@@ -33,13 +33,20 @@ ELSETS = {
 
 def resolve_odb_folder(default_path):
     """
-    Resolve ODB folder path without interactive input.
+    Resolve ODB folder path.
 
     Priority:
       1) command-line arg: --folder=<path> or folder=<path>
       2) environment var: ABAQUS_POST_FOLDER
-      3) configured default_path in USER SETTINGS
+      3) interactive prompt (if terminal is available)
+      4) configured default_path in USER SETTINGS
     """
+    def prompt_text(message):
+        try:
+            return raw_input(message)  # Python 2 (Abaqus legacy)
+        except NameError:
+            return input(message)      # Python 3
+
     folder_from_cli = None
     for arg in sys.argv[1:]:
         if arg.startswith("--folder="):
@@ -50,10 +57,18 @@ def resolve_odb_folder(default_path):
             break
 
     folder_from_env = os.environ.get("ABAQUS_POST_FOLDER", "").strip().strip('"')
-    resolved = folder_from_cli or folder_from_env or default_path
-
-    if not os.path.isdir(resolved):
-        raise FileNotFoundError("Folder does not exist: {}".format(resolved))
+    if folder_from_cli:
+        resolved = folder_from_cli
+    elif folder_from_env:
+        resolved = folder_from_env
+    elif sys.stdin and sys.stdin.isatty():
+        print("\n[INPUT] ODB folder selection")
+        print("Default folder_path: {}".format(default_path))
+        typed = prompt_text("Enter folder path containing .odb files (press Enter to use default): ")
+        typed = typed.strip().strip('"')
+        resolved = typed if typed else default_path
+    else:
+        resolved = default_path
 
     if folder_from_cli:
         print("[INFO] Using ODB folder from CLI: {}".format(resolved))
@@ -61,6 +76,9 @@ def resolve_odb_folder(default_path):
         print("[INFO] Using ODB folder from ABAQUS_POST_FOLDER: {}".format(resolved))
     else:
         print("[INFO] Using default ODB folder_path: {}".format(resolved))
+
+    if not os.path.isdir(resolved):
+        raise FileNotFoundError("Folder does not exist: {}".format(resolved))
     return resolved
 
 # =========================
