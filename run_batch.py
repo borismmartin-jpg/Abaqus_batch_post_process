@@ -27,6 +27,10 @@ def select_input_folder():
         return env_folder
 
     try:
+    """Prompt user and open a folder browser to pick the input directory."""
+    user_choice = input("Select input folder using file browser? (Y/n): ").strip().lower()
+
+    if user_choice in ("", "y", "yes"):
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
@@ -44,6 +48,17 @@ def select_input_folder():
     raise RuntimeError(
         "No input folder selected. Set ABAQUS_INPUT_FOLDER or DEFAULT_INPUT_FOLDER."
     )
+
+        if folder:
+            return folder
+
+        print("No folder selected in browser.")
+
+    folder = input("Enter full folder path with .inp files: ").strip().strip('"')
+    if not folder:
+        raise ValueError("No folder path provided.")
+
+    return folder
 
 
 def is_job_completed(job_name):
