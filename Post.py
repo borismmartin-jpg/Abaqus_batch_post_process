@@ -21,6 +21,7 @@ output_summary = "SUMMARY_RESULTS.csv"
 output_curves_folder = "CURVES"
 output_images_folder = "IMAGES"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
+image_modes = ["S_MISES", "STH"]  # Stress contour + shell thickness (if available)
 MIDSPAN_SET = "N-MIDSPAN-BOT"
 ELSETS = {
     "BF": "E-BF-MIDSPAN",
@@ -128,25 +129,54 @@ def compute_energy(disp, load):
 # -------------------------
 def find_closest_frame(step, target_lpf):
     return min(step.frames, key=lambda f: abs(f.frameValue - target_lpf))
-def export_stress_image(odb_path, target_lpf):
+
+def set_primary_variable(vp, frame, mode):
+    """
+    Configure viewport primary variable for a requested image mode.
+    """
+    if mode == "S_MISES":
+        vp.odbDisplay.setPrimaryVariable(
+            variableLabel='S',
+            outputPosition=INTEGRATION_POINT,
+            refinement=(INVARIANT, 'Mises')
+        )
+        return "S_MISES"
+
+    if mode == "STH":
+        # Abaqus shell thickness field output labels can vary by setup/version.
+        # Try common labels in order and use the first one that exists.
+        available = frame.fieldOutputs.keys()
+        candidates = ["STH", "H", "THICKNESS"]
+        found = [c for c in candidates if c in available]
+        if not found:
+            raise KeyError("No shell thickness field found (tried: STH, H, THICKNESS)")
+
+        field_label = found[0]
+        vp.odbDisplay.setPrimaryVariable(variableLabel=field_label, outputPosition=INTEGRATION_POINT)
+        return field_label
+
+    raise ValueError(f"Unsupported image mode: {mode}")
+
+
+def export_image(odb_path, target_lpf, mode):
     job_name = os.path.basename(odb_path).replace(".odb", "")
     odb = openOdb(path=odb_path)  # <-- use openOdb
-    step = odb.steps[step_name]
+    step = safe_get_step(odb)
+    used_step_name = step.name
 
     vp = session.Viewport(name=f'VP_{job_name}', origin=(0,0), width=200, height=150)
     vp.setValues(displayedObject=odb)
 
     frame = find_closest_frame(step, target_lpf)
-    vp.odbDisplay.setFrame(step=step_name, frame=frame.incrementNumber)
-    vp.odbDisplay.setPrimaryVariable(variableLabel='S', outputPosition=INTEGRATION_POINT,
-                                     refinement=(INVARIANT, 'Mises'))
+    vp.odbDisplay.setFrame(step=used_step_name, frame=frame.incrementNumber)
+    resolved_mode = set_primary_variable(vp, frame, mode)
     vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
     vp.view.fitView()
 
     if not os.path.exists(output_images_folder):
         os.makedirs(output_images_folder)
 
-    file_path = os.path.join(output_images_folder, f"{job_name}_LPF_{target_lpf:.2f}.png")
+    file_path = os.path.join(output_images_folder, f"{job_name}_{resolved_mode}_LPF_{target_lpf:.2f}.png")
     session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
     odb.close()
 # -------------------------
@@ -220,10 +250,11 @@ if results:
 # POST-PROCESSING: Export images
 # -------------------------
 for odb_file in odb_files:
-    for lpf in target_LPFs_for_image:
-        try:
-            export_stress_image(odb_file, lpf)
-        except Exception as e:
-            print(f"[ERROR IMAGE] {odb_file}: {e}")
+    for mode in image_modes:
+        for lpf in target_LPFs_for_image:
+            try:
+                export_image(odb_file, lpf, mode)
+            except Exception as e:
+                print(f"[ERROR IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
 
 print("\n[OK] Images exported")
