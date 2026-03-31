@@ -428,14 +428,8 @@ if results:
 
 # -------------------------
 # POST-PROCESSING: Export images
+# Only export first-yield and max-load images per ODB
 # -------------------------
-for odb_file in odb_files:
-    for lpf in target_LPFs_for_image:
-        try:
-            export_stress_image(odb_file, lpf, output_images_folder)
-        except Exception as e:
-            print(f"[ERROR IMAGE] {odb_file}: {e}")
-
 for c in curve_payloads:
     odb_name = f'{c["Job"]}.odb'
     if c["yield_lpf"] is not None:
@@ -447,12 +441,6 @@ for c in curve_payloads:
         export_named_stress_image(odb_name, c["peak_lpf"], output_images_folder, "MAX_LOAD")
     except Exception as e:
         print(f"[ERROR MAX LOAD IMAGE] {odb_name}: {e}")
-
-for odb_file in odb_files:
-    try:
-        export_thickness_image(odb_file, output_thickness_folder, output_elset_check)
-    except Exception as e:
-        print(f"[ERROR THICKNESS IMAGE] {odb_file}: {e}")
 
 try:
     export_combined_curve_plot(curve_payloads, output_root)
