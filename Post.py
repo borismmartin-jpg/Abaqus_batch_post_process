@@ -13,11 +13,12 @@ import numpy as np
 # =========================
 folder_path = r"C:\Users\borism\Desktop\Claude Inp file"
 step_name = "Load-to-Failure"
-target_load = 350000.0   # N
+target_load = 350.0      # kN
 peeq_threshold = 1e-6
 output_summary = "SUMMARY_RESULTS.csv"
 output_curves_folder = "CURVES"
 output_images_folder = "IMAGES"
+output_thickness_folder = "THICKNESS_IMAGES"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
 MIDSPAN_SET = "N-MIDSPAN-BOT"
 ELSETS = {
@@ -48,7 +49,7 @@ def extract_curve_data(step, odb):
         u = frame.fieldOutputs["U"].getSubset(region=region)
         u2 = max([abs(v.data[1]) for v in u.values])
         disp.append(u2)
-        load.append(lpf * target_load)
+        load.append(lpf * target_load)  # kN
     return np.array(disp), np.array(load)
 
 # -------------------------
@@ -59,7 +60,7 @@ def compute_stiffness(disp, load):
     if n < 2: return None
     try:
         coeffs = np.polyfit(disp[:n], load[:n], 1)
-        return coeffs[0] / 1000.0  # kN/mm
+        return coeffs[0]  # kN/mm
     except:
         return None
 
@@ -119,7 +120,7 @@ def extract_local_metrics(step, odb):
 # Energy absorption
 # -------------------------
 def compute_energy(disp, load):
-    return np.trapz(load, disp)/1000.0  # kN.mm
+    return np.trapz(load, disp)  # kN.mm
 
 # -------------------------
 # Stress image export
@@ -147,6 +148,39 @@ def export_stress_image(odb_path, target_lpf):
     file_path = os.path.join(output_images_folder, f"{job_name}_LPF_{target_lpf:.2f}.png")
     session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
     odb.close()
+
+# -------------------------
+# Thickness image export
+# -------------------------
+def export_thickness_image(odb_path):
+    job_name = os.path.basename(odb_path).replace(".odb", "")
+    odb = openOdb(path=odb_path)
+    step = safe_get_step(odb)
+
+    vp = session.Viewport(name=f'VP_THK_{job_name}', origin=(0, 0), width=200, height=150)
+    vp.setValues(displayedObject=odb)
+
+    # Thickness is generally available as STH for shell elements.
+    frame = step.frames[-1]
+    vp.odbDisplay.setFrame(step=step.name, frame=frame.incrementNumber)
+    if "STH" in frame.fieldOutputs:
+        vp.odbDisplay.setPrimaryVariable(variableLabel='STH', outputPosition=INTEGRATION_POINT)
+    elif "H" in frame.fieldOutputs:
+        vp.odbDisplay.setPrimaryVariable(variableLabel='H', outputPosition=INTEGRATION_POINT)
+    else:
+        print(f"[WARNING] {job_name}: no shell thickness field output (STH/H) found.")
+        odb.close()
+        return
+
+    vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
+    vp.view.fitView()
+
+    if not os.path.exists(output_thickness_folder):
+        os.makedirs(output_thickness_folder)
+
+    file_path = os.path.join(output_thickness_folder, f"{job_name}_THICKNESS.png")
+    session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
+    odb.close()
 # -------------------------
 # Single ODB processing
 # -------------------------
@@ -159,9 +193,9 @@ def process_odb(odb_file):
     # Curve
     disp, load = extract_curve_data(step, odb)
     max_disp = float(np.max(disp))
-    peak_load = float(np.max(load)/1000.0)
+    peak_load = float(np.max(load))
     yield_lpf = detect_first_yield(step)
-    yield_load = yield_lpf * target_load / 1000.0 if yield_lpf else None
+    yield_load = yield_lpf * target_load if yield_lpf else None
     stiffness = compute_stiffness(disp, load)
     energy = compute_energy(disp, load)
     max_stress, max_peeq, failure_zone = extract_local_metrics(step, odb)
@@ -173,7 +207,7 @@ def process_odb(odb_file):
     with open(curve_file,"w",newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Disp (mm)", "Load (kN)"])
-        for d,l in zip(disp,load): writer.writerow([d, l/1000.0])
+        for d,l in zip(disp,load): writer.writerow([d, l])
 
     return {
         "Job": job_name,
@@ -223,5 +257,11 @@ for odb_file in odb_files:
             export_stress_image(odb_file, lpf)
         except Exception as e:
             print(f"[ERROR IMAGE] {odb_file}: {e}")
+
+for odb_file in odb_files:
+    try:
+        export_thickness_image(odb_file)
+    except Exception as e:
+        print(f"[ERROR THICKNESS IMAGE] {odb_file}: {e}")
 
 print("\n[OK] Images exported")
