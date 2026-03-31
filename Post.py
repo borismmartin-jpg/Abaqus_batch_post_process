@@ -33,21 +33,35 @@ ELSETS = {
 
 def resolve_odb_folder(default_path):
     """
-    Prompt user for ODB folder path; press Enter to keep configured default.
-    In non-interactive runs (e.g., noGUI batch), silently use default.
-    """
-    if not sys.stdin or not sys.stdin.isatty():
-        print(f"[INFO] Non-interactive run detected. Using default folder_path: {default_path}")
-        return default_path
+    Resolve ODB folder path without interactive input.
 
-    print("\n[INPUT] ODB folder selection")
-    print(f"Default folder_path: {default_path}")
-    try:
-        user_path = input("Enter folder path containing .odb files (press Enter to use default): ").strip().strip('"')
-    except EOFError:
-        print(f"[INFO] Input unavailable. Using default folder_path: {default_path}")
-        return default_path
-    return user_path if user_path else default_path
+    Priority:
+      1) command-line arg: --folder=<path> or folder=<path>
+      2) environment var: ABAQUS_POST_FOLDER
+      3) configured default_path in USER SETTINGS
+    """
+    folder_from_cli = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--folder="):
+            folder_from_cli = arg.split("=", 1)[1].strip().strip('"')
+            break
+        if arg.startswith("folder="):
+            folder_from_cli = arg.split("=", 1)[1].strip().strip('"')
+            break
+
+    folder_from_env = os.environ.get("ABAQUS_POST_FOLDER", "").strip().strip('"')
+    resolved = folder_from_cli or folder_from_env or default_path
+
+    if not os.path.isdir(resolved):
+        raise FileNotFoundError("Folder does not exist: {}".format(resolved))
+
+    if folder_from_cli:
+        print("[INFO] Using ODB folder from CLI: {}".format(resolved))
+    elif folder_from_env:
+        print("[INFO] Using ODB folder from ABAQUS_POST_FOLDER: {}".format(resolved))
+    else:
+        print("[INFO] Using default ODB folder_path: {}".format(resolved))
+    return resolved
 
 # =========================
 # ======== FUNCTIONS ======
