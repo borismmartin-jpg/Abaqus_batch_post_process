@@ -6,6 +6,8 @@ from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
 import os, csv
+import tkinter as tk
+from tkinter import filedialog
 import numpy as np
 
 APP_VERSION = "2.0.0-wip"
@@ -21,12 +23,44 @@ output_summary = "SUMMARY_RESULTS.csv"
 output_curves_folder = "CURVES"
 output_images_folder = "IMAGES"
 target_LPFs_for_image = [0.5, 1.0, 1.2]   # Example: 50%, 100%, 120% load
+image_modes = ["S_MISES"]  # Add "STH" only when shell thickness output exists in ODB
 MIDSPAN_SET = "N-MIDSPAN-BOT"
 ELSETS = {
     "BF": "E-BF-MIDSPAN",
     "TF": "E-TF-MIDSPAN",
     "WEB": "E-WEB-LOADPT"
 }
+
+
+def select_odb_folder(default_folder):
+    """
+    Select ODB folder with a GUI picker when possible.
+    Falls back to default/current directory in non-GUI sessions.
+    """
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select folder containing .odb files")
+        root.destroy()
+        if folder:
+            return folder
+    except Exception as e:
+        print("[WARN] Folder picker unavailable in this Abaqus session: {}".format(e))
+
+    cwd = os.getcwd()
+    default_has_odb = os.path.isdir(default_folder) and any(f.endswith(".odb") for f in os.listdir(default_folder))
+    cwd_has_odb = os.path.isdir(cwd) and any(f.endswith(".odb") for f in os.listdir(cwd))
+
+    if default_has_odb:
+        print("[INFO] Using default folder_path: {}".format(default_folder))
+        return default_folder
+    if cwd_has_odb:
+        print("[INFO] Default folder has no ODB files; using current directory: {}".format(cwd))
+        return cwd
+
+    print("[INFO] Using default folder_path: {}".format(default_folder))
+    return default_folder
 
 # =========================
 # ======== FUNCTIONS ======
@@ -128,27 +162,65 @@ def compute_energy(disp, load):
 # -------------------------
 def find_closest_frame(step, target_lpf):
     return min(step.frames, key=lambda f: abs(f.frameValue - target_lpf))
-def export_stress_image(odb_path, target_lpf):
+
+def set_primary_variable(vp, frame, mode):
+    """
+    Configure viewport primary variable for a requested image mode.
+    """
+    if mode == "S_MISES":
+        vp.odbDisplay.setPrimaryVariable(
+            variableLabel='S',
+            outputPosition=INTEGRATION_POINT,
+            refinement=(INVARIANT, 'Mises')
+        )
+        return "S_MISES"
+
+    if mode == "STH":
+        # Abaqus shell thickness field output labels can vary by setup/version.
+        # Try common labels in order and use the first one that exists.
+        available = frame.fieldOutputs.keys()
+        candidates = ["STH", "H", "THICKNESS"]
+        found = [c for c in candidates if c in available]
+        if not found:
+            raise KeyError("No shell thickness field found (tried: STH, H, THICKNESS)")
+
+        field_label = found[0]
+        for pos in (INTEGRATION_POINT, ELEMENT_NODAL, CENTROID):
+            try:
+                vp.odbDisplay.setPrimaryVariable(variableLabel=field_label, outputPosition=pos)
+                return field_label
+            except Exception:
+                continue
+        raise RuntimeError(f"Thickness variable '{field_label}' found but could not be displayed")
+
+    raise ValueError(f"Unsupported image mode: {mode}")
+
+
+def export_image(odb_path, target_lpf, mode):
     job_name = os.path.basename(odb_path).replace(".odb", "")
     odb = openOdb(path=odb_path)  # <-- use openOdb
-    step = odb.steps[step_name]
 
-    vp = session.Viewport(name=f'VP_{job_name}', origin=(0,0), width=200, height=150)
-    vp.setValues(displayedObject=odb)
+    try:
+        step = safe_get_step(odb)
+        used_step_name = step.name
 
-    frame = find_closest_frame(step, target_lpf)
-    vp.odbDisplay.setFrame(step=step_name, frame=frame.incrementNumber)
-    vp.odbDisplay.setPrimaryVariable(variableLabel='S', outputPosition=INTEGRATION_POINT,
-                                     refinement=(INVARIANT, 'Mises'))
-    vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
-    vp.view.fitView()
+        vp_name = f"VP_{job_name}_{mode}_{target_lpf:.2f}".replace(".", "p")
+        vp = session.Viewport(name=vp_name, origin=(0,0), width=200, height=150)
+        vp.setValues(displayedObject=odb)
 
-    if not os.path.exists(output_images_folder):
-        os.makedirs(output_images_folder)
+        frame = find_closest_frame(step, target_lpf)
+        vp.odbDisplay.setFrame(step=used_step_name, frame=frame.incrementNumber)
+        resolved_mode = set_primary_variable(vp, frame, mode)
+        vp.odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF,))
+        vp.view.fitView()
 
-    file_path = os.path.join(output_images_folder, f"{job_name}_LPF_{target_lpf:.2f}.png")
-    session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
-    odb.close()
+        if not os.path.exists(output_images_folder):
+            os.makedirs(output_images_folder)
+
+        file_path = os.path.join(output_images_folder, f"{job_name}_{resolved_mode}_LPF_{target_lpf:.2f}.png")
+        session.printToFile(fileName=file_path, format=PNG, canvasObjects=(vp,))
+    finally:
+        odb.close()
 # -------------------------
 # Single ODB processing
 # -------------------------
@@ -192,8 +264,13 @@ def process_odb(odb_file):
 # =========================
 # ======== MAIN ===========
 # =========================
+folder_path = select_odb_folder(folder_path)
+if not os.path.isdir(folder_path):
+    raise FileNotFoundError(f"Folder does not exist: {folder_path}")
+
 os.chdir(folder_path)
 odb_files = [f for f in os.listdir() if f.endswith(".odb")]
+print(f"[INFO] Found {len(odb_files)} ODB files in: {folder_path}")
 
 # -------------------------
 # PROCESSING
@@ -220,10 +297,11 @@ if results:
 # POST-PROCESSING: Export images
 # -------------------------
 for odb_file in odb_files:
-    for lpf in target_LPFs_for_image:
-        try:
-            export_stress_image(odb_file, lpf)
-        except Exception as e:
-            print(f"[ERROR IMAGE] {odb_file}: {e}")
+    for mode in image_modes:
+        for lpf in target_LPFs_for_image:
+            try:
+                export_image(odb_file, lpf, mode)
+            except Exception as e:
+                print(f"[ERROR IMAGE] {odb_file} [{mode} @ LPF={lpf}]: {e}")
 
 print("\n[OK] Images exported")
