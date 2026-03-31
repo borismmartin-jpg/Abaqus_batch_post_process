@@ -1085,11 +1085,18 @@ function zoneThicknesses(prof, p, nx, xs) {
   return result;
 }
 
-function pitThicknesses(prof, p, nx, xs, seedBase) {
+function pitThicknesses(prof, p, nx, xs, nyW, ysW, nzF, zsF, seedBase) {
   var faces = prof.faces || {tf:true,web:true,bf:true};
   var result={webT:[],tfT:[],bfT:[]};
   var webLoss=[], tfLoss=[], bfLoss=[];
-  for (var i=0;i<nx;i++) { webLoss.push(0); tfLoss.push(0); bfLoss.push(0); }
+  for (var xi=0;xi<nx;xi++) {
+    webLoss.push(Array(nyW).fill(0));
+    tfLoss.push(Array(nzF).fill(0));
+    bfLoss.push(Array(nzF).fill(0));
+  }
+  var yCtr=[], zCtr=[];
+  for (var yi=0;yi<nyW;yi++) yCtr.push((ysW[yi] + ysW[yi+1]) / 2);
+  for (var zi=0;zi<nzF;zi++) zCtr.push((zsF[zi] + zsF[zi+1]) / 2);
 
   function mkRand(seed) {
     var t = seed >>> 0;
@@ -1100,7 +1107,7 @@ function pitThicknesses(prof, p, nx, xs, seedBase) {
       return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
     };
   }
-  function addFacePits(face, lossArr, faceDim, faceT, seedOff) {
+  function addFacePits(face, lossArr, faceDim, faceT, tCtr, seedOff) {
     if (!faces[face]) return;
     var areaM2 = (p.L * faceDim) / 1e6;
     var nPits = Math.max(1, Math.round(prof.den * areaM2));
@@ -1108,6 +1115,7 @@ function pitThicknesses(prof, p, nx, xs, seedBase) {
     var rnd = mkRand((seedBase+1)*2654435761 + seedOff);
     for (var k=0;k<nPits;k++) {
       var cx = rnd() * p.L;
+      var ct = rnd() * faceDim;
       var dia = (prof.type==='randpit') ? (Math.min(prof.dMin,prof.dMax) + rnd()*(Math.abs(prof.dMax-prof.dMin))) : prof.dia;
       var r = Math.max(0.25, dia/2);
       var depth;
@@ -1118,22 +1126,33 @@ function pitThicknesses(prof, p, nx, xs, seedBase) {
         depth = prof.fullWall ? faceT : prof.dep;
       }
       for (var xi=0;xi<nx;xi++) {
-        var x = (xs[xi]+xs[xi+1])/2, dx=Math.abs(x-cx);
-        if (dx>r) continue;
-        var local = depth * Math.sqrt(Math.max(0,1-(dx/r)*(dx/r)));
-        if (local > lossArr[xi]) lossArr[xi] = local;
+        var x = (xs[xi]+xs[xi+1])/2, dx=(x-cx);
+        if (Math.abs(dx)>r) continue;
+        for (var ti=0;ti<tCtr.length;ti++) {
+          var dt = tCtr[ti] - ct;
+          var rr = dx*dx + dt*dt;
+          if (rr > r*r) continue;
+          var local = depth * Math.sqrt(Math.max(0, 1 - rr/(r*r)));
+          if (local > lossArr[xi][ti]) lossArr[xi][ti] = local;
+        }
       }
     }
   }
 
-  addFacePits('web', webLoss, p.d, p.tw, 17);
-  addFacePits('tf',  tfLoss,  p.b, p.tf, 31);
-  addFacePits('bf',  bfLoss,  p.b, p.tf, 47);
+  addFacePits('web', webLoss, p.d, p.tw, yCtr, 17);
+  addFacePits('tf',  tfLoss,  p.b, p.tf, zCtr, 31);
+  addFacePits('bf',  bfLoss,  p.b, p.tf, zCtr, 47);
 
   for (var xi=0;xi<nx;xi++) {
-    result.webT.push(Math.max(0.5, p.tw - webLoss[xi]));
-    result.tfT.push(Math.max(0.5, p.tf - tfLoss[xi]));
-    result.bfT.push(Math.max(0.5, p.tf - bfLoss[xi]));
+    var webRow=[], tfRow=[], bfRow=[];
+    for (var yi=0;yi<nyW;yi++) webRow.push(Math.max(0.5, p.tw - webLoss[xi][yi]));
+    for (var zi=0;zi<nzF;zi++) {
+      tfRow.push(Math.max(0.5, p.tf - tfLoss[xi][zi]));
+      bfRow.push(Math.max(0.5, p.tf - bfLoss[xi][zi]));
+    }
+    result.webT.push(webRow);
+    result.tfT.push(tfRow);
+    result.bfT.push(bfRow);
   }
   return result;
 }
@@ -1270,7 +1289,7 @@ function makeINP(prof, p, idx) {
   var isZone = (prof.type === 'zone');
   var isPitDist = (prof.type === 'pitting' || prof.type === 'randpit');
   var isDistributed = isZone || isPitDist;
-  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : (isPitDist ? pitThicknesses(prof, p, nx, xs, idx) : null);
+  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : (isPitDist ? pitThicknesses(prof, p, nx, xs, nyW, ysW, nzF, zsF, idx) : null);
 
   // Global effective thicknesses (used for non-zone profiles and header comments)
   var etf, etw, ebf;
@@ -1365,12 +1384,20 @@ function makeINP(prof, p, idx) {
     w('** Zone x=['+prof.x1+','+prof.x2+'] mm  loss_inside='+prof.inL+' mm  loss_outside='+prof.outL+' mm');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
   } else if (isPitDist) {
-    w('** Pits are represented by grouped neighbouring element columns (curved pit profile in x).');
-    w('** Use finer mesh to better capture near-circular pit geometry in the INP model.');
+    w('** Pits are represented with circular footprints on each face (x-transverse plane).');
+    w('** Each element gets local thickness from pit overlap, enabling circular pitting maps.');
+    var tfMin = Infinity, bfMin = Infinity, webMin = Infinity;
+    for (var xi=0;xi<nx;xi++) {
+      for (var yi=0;yi<nyW;yi++) webMin = Math.min(webMin, zt.webT[xi][yi]);
+      for (var zi=0;zi<nzF;zi++) {
+        tfMin = Math.min(tfMin, zt.tfT[xi][zi]);
+        bfMin = Math.min(bfMin, zt.bfT[xi][zi]);
+      }
+    }
     w('** EFFECTIVE THICKNESSES (reported minima over all columns):');
-    w('**   TF_min = '+Math.min.apply(null,zt.tfT).toFixed(3)+' mm');
-    w('**   BF_min = '+Math.min.apply(null,zt.bfT).toFixed(3)+' mm');
-    w('**   WEB_min= '+Math.min.apply(null,zt.webT).toFixed(3)+' mm');
+    w('**   TF_min = '+tfMin.toFixed(3)+' mm');
+    w('**   BF_min = '+bfMin.toFixed(3)+' mm');
+    w('**   WEB_min= '+webMin.toFixed(3)+' mm');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
     w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
@@ -1422,33 +1449,57 @@ function makeINP(prof, p, idx) {
   if (isZone) {
     w('** Zone profile: inside=['+prof.x1+','+prof.x2+'] mm loss='+prof.inL+' mm  outside loss='+prof.outL+' mm');
   } else if (isPitDist) {
-    w('** Pitting profile: per-column grouped neighbouring elements approximate pit footprints.');
+    w('** Pitting profile: element-wise circular pit footprints (not column-smearing).');
   } else {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
-  for (var xi=0;xi<nx;xi++) {
-    var colLabel='COL-'+String(xi+1).padStart(3,'0');
-    var twEff, tfEff, bfEff;
-    if (isDistributed) {
-      twEff = zt.webT[xi]; tfEff = zt.tfT[xi]; bfEff = zt.bfT[xi];
-    } else {
-      twEff = etw; tfEff = etf; bfEff = ebf;
+  if (isPitDist) {
+    for (var xi=0;xi<nx;xi++) {
+      for (var yi=0;yi<nyW;yi++) {
+        var webEid = webES + xi*nyW + yi;
+        var webLbl = 'WEB-CELL-'+String(xi+1).padStart(3,'0')+'-'+String(yi+1).padStart(3,'0');
+        w('*Elset, elset='+webLbl); w(String(webEid));
+        w('*Shell Section, elset='+webLbl+', material=STEEL');
+        w(zt.webT[xi][yi].toFixed(4)+', 5');
+      }
+      for (var zi=0;zi<nzF;zi++) {
+        var tfEid = tfES + xi*nzF + zi;
+        var bfEid = bfES + xi*nzF + zi;
+        var tfLbl = 'TF-CELL-'+String(xi+1).padStart(3,'0')+'-'+String(zi+1).padStart(3,'0');
+        var bfLbl = 'BF-CELL-'+String(xi+1).padStart(3,'0')+'-'+String(zi+1).padStart(3,'0');
+        w('*Elset, elset='+tfLbl); w(String(tfEid));
+        w('*Shell Section, elset='+tfLbl+', material=STEEL');
+        w(zt.tfT[xi][zi].toFixed(4)+', 5');
+        w('*Elset, elset='+bfLbl); w(String(bfEid));
+        w('*Shell Section, elset='+bfLbl+', material=STEEL');
+        w(zt.bfT[xi][zi].toFixed(4)+', 5');
+      }
     }
-    // Web column elements
-    var wColES = webES + xi*nyW, wColEE = webES + (xi+1)*nyW - 1;
-    w('*Elset, elset=WEB-'+colLabel+', generate'); w(wColES+', '+wColEE+', 1');
-    w('*Shell Section, elset=WEB-'+colLabel+', material=STEEL');
-    w(twEff.toFixed(4)+', 5');
-    // TF column elements
-    var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
-    w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
-    w('*Shell Section, elset=TF-'+colLabel+', material=STEEL');
-    w(tfEff.toFixed(4)+', 5');
-    // BF column elements
-    var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
-    w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
-    w('*Shell Section, elset=BF-'+colLabel+', material=STEEL');
-    w(bfEff.toFixed(4)+', 5');
+  } else {
+    for (var xi=0;xi<nx;xi++) {
+      var colLabel='COL-'+String(xi+1).padStart(3,'0');
+      var twEff, tfEff, bfEff;
+      if (isDistributed) {
+        twEff = zt.webT[xi]; tfEff = zt.tfT[xi]; bfEff = zt.bfT[xi];
+      } else {
+        twEff = etw; tfEff = etf; bfEff = ebf;
+      }
+      // Web column elements
+      var wColES = webES + xi*nyW, wColEE = webES + (xi+1)*nyW - 1;
+      w('*Elset, elset=WEB-'+colLabel+', generate'); w(wColES+', '+wColEE+', 1');
+      w('*Shell Section, elset=WEB-'+colLabel+', material=STEEL');
+      w(twEff.toFixed(4)+', 5');
+      // TF column elements
+      var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
+      w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
+      w('*Shell Section, elset=TF-'+colLabel+', material=STEEL');
+      w(tfEff.toFixed(4)+', 5');
+      // BF column elements
+      var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
+      w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
+      w('*Shell Section, elset=BF-'+colLabel+', material=STEEL');
+      w(bfEff.toFixed(4)+', 5');
+    }
   }
 
   w('*End Part');
