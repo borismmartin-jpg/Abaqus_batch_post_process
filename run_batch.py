@@ -3,27 +3,32 @@ import subprocess
 import tkinter as tk
 from tkinter import filedialog
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0-wip"
 
 # =========================
 # USER SETTINGS
 # =========================
 ABAQUS_CMD = r"C:\SIMULIA\Commands\abaqus.bat"
+default_input_folder = r"C:\Users\borism\Desktop\Claude Inp file"
 
 cpus = 4
 memory = "90%"
 run_in_background = False  # False = sequential (recommended)
 
-def select_odb_folder(default_folder):
+
+# =========================
+# FUNCTIONS
+# =========================
+def select_input_folder(default_folder):
     """
-    Select ODB folder with a GUI picker when possible.
+    Select INP folder with GUI picker when possible.
     Falls back to default/current directory in non-GUI sessions.
     """
     try:
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        folder = filedialog.askdirectory(title="Select folder containing .odb files")
+        folder = filedialog.askdirectory(title="Select folder containing .inp files")
         root.destroy()
         if folder:
             return folder
@@ -31,42 +36,18 @@ def select_odb_folder(default_folder):
         print("[WARN] Folder picker unavailable in this Abaqus session: {}".format(e))
 
     cwd = os.getcwd()
-    default_has_odb = os.path.isdir(default_folder) and any(f.endswith(".odb") for f in os.listdir(default_folder))
-    cwd_has_odb = os.path.isdir(cwd) and any(f.endswith(".odb") for f in os.listdir(cwd))
+    default_has_inp = os.path.isdir(default_folder) and any(f.endswith(".inp") for f in os.listdir(default_folder))
+    cwd_has_inp = os.path.isdir(cwd) and any(f.endswith(".inp") for f in os.listdir(cwd))
 
-    if default_has_odb:
-        print("[INFO] Using default folder_path: {}".format(default_folder))
+    if default_has_inp:
+        print("[INFO] Using default input folder: {}".format(default_folder))
         return default_folder
-    if cwd_has_odb:
-        print("[INFO] Default folder has no ODB files; using current directory: {}".format(cwd))
+    if cwd_has_inp:
+        print("[INFO] Default input folder has no INP files; using current directory: {}".format(cwd))
         return cwd
 
-    print("[INFO] Using default folder_path: {}".format(default_folder))
+    print("[INFO] Using default input folder: {}".format(default_folder))
     return default_folder
-# =========================
-# FUNCTIONS
-# =========================
-def select_input_folder():
-    """Prompt user and open a folder browser to pick the input directory."""
-    user_choice = input("Select input folder using file browser? (Y/n): ").strip().lower()
-
-    if user_choice in ("", "y", "yes"):
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        folder = filedialog.askdirectory(title="Select folder containing .inp files")
-        root.destroy()
-
-        if folder:
-            return folder
-
-        print("No folder selected in browser.")
-
-    folder = input("Enter full folder path with .inp files: ").strip().strip('"')
-    if not folder:
-        raise ValueError("No folder path provided.")
-
-    return folder
 
 
 def is_job_completed(job_name):
@@ -113,7 +94,7 @@ def run_job(inp_file):
 # =========================
 # MAIN
 # =========================
-folder_path = select_input_folder()
+folder_path = select_input_folder(default_input_folder)
 
 if not os.path.isdir(folder_path):
     raise FileNotFoundError(f"Folder does not exist: {folder_path}")
