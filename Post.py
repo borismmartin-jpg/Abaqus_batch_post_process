@@ -8,6 +8,8 @@ from odbAccess import openOdb
 import os, csv
 import numpy as np
 
+APP_VERSION = "1.0.0"
+
 # =========================
 # USER SETTINGS
 # =========================
