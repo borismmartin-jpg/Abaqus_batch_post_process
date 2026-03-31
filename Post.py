@@ -6,8 +6,6 @@ from abaqus import *
 from abaqusConstants import *
 from odbAccess import openOdb
 import os, csv
-import tkinter as tk
-from tkinter import filedialog
 import numpy as np
 
 APP_VERSION = "2.0.0-wip"
@@ -34,23 +32,10 @@ ELSETS = {
 
 def select_odb_folder(default_folder):
     """
-    Same folder-selection flow as run_batch.py:
-      - Ask whether to use file browser.
-      - If user skips browser or cancels, allow manual path entry.
-      - If blank manual entry, fall back to default folder from USER SETTINGS.
+    Folder-selection flow for Abaqus script run:
+      - Ask for manual path.
+      - If blank, use default folder from USER SETTINGS.
     """
-    user_choice = input("Select ODB folder using file browser? (Y/n): ").strip().lower()
-
-    if user_choice in ("", "y", "yes"):
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        folder = filedialog.askdirectory(title="Select folder containing .odb files")
-        root.destroy()
-        if folder:
-            return folder
-        print("No folder selected in browser.")
-
     folder = input("Enter full folder path with .odb files (press Enter to use default): ").strip().strip('"')
     if folder:
         return folder
