@@ -53,6 +53,32 @@ header { display: flex; align-items: center; gap: 14px; padding: 0 20px; height:
 .fld  { display: flex; flex-direction: column; gap: 3px; }
 .fld label { font-size: 9px; color: var(--tx3); letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
 .fld input, .fld select { background: var(--bg); border: 1px solid var(--brd2); color: var(--tx); padding: 5px 8px; font-family: var(--mono); font-size: 11.5px; outline: none; width: 100%; transition: border-color .15s; -moz-appearance: textfield; appearance: none; }
+input[type="checkbox"].ckvis {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--brd2);
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+}
+input[type="checkbox"].ckvis:checked {
+  background: var(--acc);
+  border-color: var(--acc);
+}
+input[type="checkbox"].ckvis:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 7px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
 input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { -webkit-appearance: none; }
 .fld input:focus, .fld select:focus { border-color: var(--acc); box-shadow: 0 0 0 2px rgba(0,229,180,.07); }
 .fld select { cursor: pointer; }
@@ -300,6 +326,7 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
     <div class="ctabs">
       <button class="ctab act" onclick="setCT('uniform')">Uniform</button>
       <button class="ctab"     onclick="setCT('pitting')">Pitting</button>
+      <button class="ctab"     onclick="setCT('randpit')">Random Pitting</button>
       <button class="ctab"     onclick="setCT('girder')">Web/Flange</button>
       <button class="ctab"     onclick="setCT('zone')">Zone</button>
       <button class="ctab"     onclick="setCT('custom')">Custom</button>
@@ -365,22 +392,49 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
         <text x="220" y="26" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="middle">Plan (web face) — pits smeared to equiv. thickness loss</text>
         <text x="110" y="62" fill="#3d5672" font-size="6.5" font-family="JetBrains Mono">density = pits / m²</text>
       </svg>
-      <div class="hint">Pitting converted to a <b>smeared equivalent thickness loss</b> = pit volume × density. Applied to web, flanges, or all faces.</div>
+      <div class="hint">Pitting converted to a <b>smeared equivalent thickness loss</b> = pit volume × density. You can apply corrosion to any combination of TF / WEB / BF, and force <b>100% wall loss</b> on selected faces.</div>
       <div class="row r2">
         <div class="fld"><label>Pit depth (mm)</label>    <input type="number" id="pdep" value="2.5" step="0.5" min="0.1"></div>
         <div class="fld"><label>Pit diameter (mm)</label> <input type="number" id="pdia" value="12"  step="1"   min="1"></div>
       </div>
       <div class="row r2">
         <div class="fld"><label>Density (pits/m²)</label><input type="number" id="pden" value="800" step="100"></div>
-        <div class="fld"><label>Apply to</label>
-          <select id="ploc">
-            <option value="web">Web only</option>
-            <option value="flanges">Flanges only</option>
-            <option value="all">All faces</option>
-          </select>
+        <div class="fld"><label>Faces</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:var(--bg);border:1px solid var(--brd2);padding:7px 8px">
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="ptf">Top flange</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="pweb" checked>Web</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="pbf">Bottom flange</label>
+          </div>
         </div>
       </div>
+      <div class="row r1">
+        <label style="display:flex;align-items:center;gap:7px;font-size:10px;color:var(--tx2)"><input type="checkbox" class="ckvis" id="pfwl">Full wall loss (100%) on selected faces</label>
+      </div>
       <button class="btn bout bfull" onclick="addPitting()">+ Add Pitting Profile</button>
+    </div>
+
+    <!-- Random pitting -->
+    <div class="cconf" id="cf-randpit">
+      <div class="hint">Random pitting generator: each pit has random diameter and wall loss (0–100%). The model uses an equivalent smeared thickness loss from the selected ranges.</div>
+      <div class="row r2">
+        <div class="fld"><label>Min pit diameter (mm)</label><input type="number" id="rpdmin" value="6" step="1" min="0.5"></div>
+        <div class="fld"><label>Max pit diameter (mm)</label><input type="number" id="rpdmax" value="20" step="1" min="0.5"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Min wall loss (%)</label><input type="number" id="rwlmin" value="10" step="1" min="0" max="100"></div>
+        <div class="fld"><label>Max wall loss (%)</label><input type="number" id="rwlmax" value="90" step="1" min="0" max="100"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Density (pits/m²)</label><input type="number" id="rpden" value="900" step="100" min="1"></div>
+        <div class="fld"><label>Faces</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:var(--bg);border:1px solid var(--brd2);padding:7px 8px">
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="rptf">Top flange</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="rpweb" checked>Web</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="rpbf">Bottom flange</label>
+          </div>
+        </div>
+      </div>
+      <button class="btn bout bfull" onclick="addRandPit()">+ Add Random Pitting Profile</button>
     </div>
 
     <!-- Web/Flange (Girder) -->
@@ -446,7 +500,7 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
         <text x="55"  y="45" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">loss outside</text>
         <text x="283" y="45" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">loss outside</text>
       </svg>
-      <div class="hint">Concentrated loss within a <b>longitudinal zone [x1→x2]</b> applied to all faces. Each element column gets its own <b>*Shell Section</b> so thickness varies correctly along the beam. A lower background loss applies outside the zone (set to 0 for none).</div>
+      <div class="hint">Concentrated loss within a <b>longitudinal zone [x1→x2]</b>. Choose any combination of TF / WEB / BF. Each element column gets its own <b>*Shell Section</b> so thickness varies correctly along the beam.</div>
       <div class="row r2">
         <div class="fld"><label>Zone start x1 (mm)</label><input type="number" id="zx1" value="500"  step="50"></div>
         <div class="fld"><label>Zone end x2 (mm)</label>  <input type="number" id="zx2" value="1500" step="50"></div>
@@ -454,6 +508,18 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
       <div class="row r2">
         <div class="fld"><label>Loss inside zone (mm)</label> <input type="number" id="zin"  value="3.0" step="0.5"  min="0"></div>
         <div class="fld"><label>Loss outside zone (mm)</label><input type="number" id="zout" value="0.5" step="0.25" min="0"></div>
+      </div>
+      <div class="row r1">
+        <div class="fld"><label>Faces</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:var(--bg);border:1px solid var(--brd2);padding:7px 8px">
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="ztf" checked>Top flange</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="zweb" checked>Web</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--tx2);text-transform:none;letter-spacing:0"><input type="checkbox" class="ckvis" id="zbf" checked>Bottom flange</label>
+          </div>
+        </div>
+      </div>
+      <div class="row r1">
+        <label style="display:flex;align-items:center;gap:7px;font-size:10px;color:var(--tx2)"><input type="checkbox" class="ckvis" id="zfwl">Full wall loss in zone (100%) on selected faces</label>
       </div>
       <button class="btn bout bfull" onclick="addZone()">+ Add Zone Profile</button>
     </div>
@@ -589,6 +655,20 @@ var STD = {
 // ═══════════════════════════════════════════════════════════════════════════════
 function gv(id) { return parseFloat(document.getElementById(id).value) || 0; }
 function gs(id) { return document.getElementById(id).value; }
+function ck(id) { return !!document.getElementById(id).checked; }
+function faceTxt(f) {
+  var out=[];
+  if (f.tf) out.push('TF');
+  if (f.web) out.push('WEB');
+  if (f.bf) out.push('BF');
+  return out.join('+');
+}
+function pitMeshHint(maxDia) {
+  var mesh = gv('iMesh') || 50;
+  if (mesh > maxDia/2) {
+    toast('Tip: use finer mesh (<= '+(maxDia/2).toFixed(1)+' mm) to resolve pit shape better');
+  }
+}
 function sv(id, v) { document.getElementById(id).value = v; }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -665,7 +745,7 @@ function setBend(m) {
 }
 
 function setCT(t) {
-  var tabs = ['uniform','pitting','girder','zone','custom'];
+  var tabs = ['uniform','pitting','randpit','girder','zone','custom'];
   document.querySelectorAll('.ctab').forEach(function(b,i) { b.classList.toggle('act', tabs[i]===t); });
   document.querySelectorAll('.cconf').forEach(function(c) { c.classList.remove('act'); });
   document.getElementById('cf-'+t).classList.add('act');
@@ -723,21 +803,46 @@ function drawXS() {
 function getLoss(prof, xFrac, zone) {
   if (!prof) return 0;
   var p = getP(), xMm = xFrac * p.L;
+  function hasFace(face) {
+    if (prof.faces) return !!prof.faces[face];
+    if (prof.loc === 'all') return true;
+    if (prof.loc === 'web') return face === 'web';
+    if (prof.loc === 'flanges') return (face === 'tf' || face === 'bf');
+    return true;
+  }
+  function faceT(face) { return face === 'web' ? p.tw : p.tf; }
   switch (prof.type) {
     case 'uniform': return prof.loss;
     case 'pitting': {
+      if (!hasFace(zone)) return 0;
+      if (prof.fullWall) return faceT(zone);
       var eq = Math.PI * Math.pow(prof.dia/2,2) * prof.dep / (1e6/prof.den);
-      if (zone==='web'    && (prof.loc==='web'    ||prof.loc==='all')) return eq*3;
-      if ((zone==='tf'||zone==='bf') && (prof.loc==='flanges'||prof.loc==='all')) return eq*2;
+      if (zone==='web') return eq*3;
+      if (zone==='tf' || zone==='bf') return eq*2;
       return 0;
+    }
+    case 'randpit': {
+      if (!hasFace(zone)) return 0;
+      var dMin=Math.min(prof.dMin, prof.dMax), dMax=Math.max(prof.dMin, prof.dMax);
+      var wlMin=Math.min(prof.wlMin, prof.wlMax)/100, wlMax=Math.max(prof.wlMin, prof.wlMax)/100;
+      var dSqMean=(dMin*dMin + dMin*dMax + dMax*dMax)/3;
+      var depthMean=((wlMin+wlMax)/2) * faceT(zone);
+      var eqRnd = (Math.PI*0.25*dSqMean*depthMean)/(1e6/prof.den);
+      return zone==='web' ? eqRnd*3 : eqRnd*2;
+    }
+    case 'zone': {
+      if (!hasFace(zone)) return 0;
+      if (prof.fullWall) {
+        var inZone = (xMm>=prof.x1 && xMm<=prof.x2);
+        return inZone ? faceT(zone) : prof.outL;
+      }
+      return (xMm>=prof.x1 && xMm<=prof.x2) ? prof.inL : prof.outL;
     }
     case 'girder':
       if (zone==='web') return prof.webL;
       if (zone==='tf')  return prof.tfL;
       if (zone==='bf')  return prof.bfL;
       return 0;
-    case 'zone':
-      return (xMm>=prof.x1 && xMm<=prof.x2) ? prof.inL : prof.outL;
     case 'custom':
       if (zone==='tf')  return prof.tfL;
       if (zone==='web') return prof.wL;
@@ -869,10 +974,23 @@ function addUniform() {
   refresh();
 }
 function addPitting() {
-  var dep=gv('pdep'),dia=gv('pdia'),den=gv('pden'),loc=gs('ploc');
-  profiles.push({type:'pitting',dep:dep,dia:dia,den:den,loc:loc,
-    label:'PIT_d'+dep+'_D'+dia+'_'+loc,
-    desc:'Pitting depth='+dep+' mm dia='+dia+' mm density='+den+'/m² loc='+loc});
+  var dep=gv('pdep'),dia=gv('pdia'),den=gv('pden');
+  var faces={tf:ck('ptf'),web:ck('pweb'),bf:ck('pbf')}, fullWall=ck('pfwl');
+  if (!faces.tf && !faces.web && !faces.bf) { toast('Select at least one face (TF/WEB/BF)'); return; }
+  profiles.push({type:'pitting',dep:dep,dia:dia,den:den,faces:faces,fullWall:fullWall,
+    label:'PIT_d'+dep+'_D'+dia+(fullWall?'_FWL':''),
+    desc:'Pitting depth='+dep+' mm dia='+dia+' mm density='+den+'/m² faces='+faceTxt(faces)+(fullWall?' full-wall':'' )});
+  pitMeshHint(dia);
+  refresh();
+}
+function addRandPit() {
+  var dMin=gv('rpdmin'), dMax=gv('rpdmax'), wlMin=gv('rwlmin'), wlMax=gv('rwlmax'), den=gv('rpden');
+  var faces={tf:ck('rptf'),web:ck('rpweb'),bf:ck('rpbf')};
+  if (!faces.tf && !faces.web && !faces.bf) { toast('Select at least one face (TF/WEB/BF)'); return; }
+  profiles.push({type:'randpit',dMin:dMin,dMax:dMax,wlMin:wlMin,wlMax:wlMax,den:den,faces:faces,
+    label:'RPIT_D'+dMin+'-'+dMax+'_WL'+wlMin+'-'+wlMax,
+    desc:'Random pitting dia=['+dMin+','+dMax+'] mm wallLoss=['+wlMin+','+wlMax+']% density='+den+'/m² faces='+faceTxt(faces)});
+  pitMeshHint(Math.max(dMin,dMax));
   refresh();
 }
 function addGirder() {
@@ -884,9 +1002,11 @@ function addGirder() {
 }
 function addZone() {
   var x1=gv('zx1'),x2=gv('zx2'),inL=gv('zin'),outL=gv('zout');
-  profiles.push({type:'zone',x1:x1,x2:x2,inL:inL,outL:outL,
-    label:'ZONE_'+x1+'-'+x2+'_'+inL+'mm',
-    desc:'Zone x=['+x1+','+x2+'] mm inside='+inL+' mm outside='+outL+' mm'});
+  var faces={tf:ck('ztf'),web:ck('zweb'),bf:ck('zbf')}, fullWall=ck('zfwl');
+  if (!faces.tf && !faces.web && !faces.bf) { toast('Select at least one face (TF/WEB/BF)'); return; }
+  profiles.push({type:'zone',x1:x1,x2:x2,inL:inL,outL:outL,faces:faces,fullWall:fullWall,
+    label:'ZONE_'+x1+'-'+x2+(fullWall?'_FWL':'')+'_'+inL+'mm',
+    desc:'Zone x=['+x1+','+x2+'] mm inside='+inL+' mm outside='+outL+' mm faces='+faceTxt(faces)+(fullWall?' full-wall-inside':'')});
   refresh();
 }
 function addCustom() {
@@ -914,7 +1034,7 @@ function clearAll() {
 }
 function refresh() {
   var el=document.getElementById('plist');
-  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',custom:'CST'};
+  var tags={uniform:'UNI',pitting:'PIT',randpit:'RPT',girder:'GDR',zone:'ZNE',custom:'CST'};
   el.innerHTML = profiles.length
     ? profiles.map(function(p,i){
         return '<div class="pitem'+(i===selIdx?' sel':'')+'" onclick="selProf('+i+')">'
@@ -949,14 +1069,71 @@ function chunkList(ids, n) {
  */
 function zoneThicknesses(prof, p, nx, xs) {
   var result={webT:[],tfT:[],bfT:[]};
+  var faces = prof.faces || {tf:true,web:true,bf:true};
   for (var xi=0;xi<nx;xi++) {
     // Element centre x = midpoint of column xi
     var xc = (xs[xi]+xs[xi+1])/2;
     var inside = (xc>=prof.x1 && xc<=prof.x2);
-    var loss = inside ? prof.inL : prof.outL;
-    result.webT.push(Math.max(0.5, p.tw - loss));
-    result.tfT.push(Math.max(0.5, p.tf - loss));
-    result.bfT.push(Math.max(0.5, p.tf - loss));
+    var lossInsideWeb = prof.fullWall ? p.tw : prof.inL;
+    var lossInsideFl  = prof.fullWall ? p.tf : prof.inL;
+    var lossWeb = inside ? lossInsideWeb : prof.outL;
+    var lossFl  = inside ? lossInsideFl  : prof.outL;
+    result.webT.push(Math.max(0.5, p.tw - (faces.web ? lossWeb : 0)));
+    result.tfT.push(Math.max(0.5, p.tf - (faces.tf ? lossFl : 0)));
+    result.bfT.push(Math.max(0.5, p.tf - (faces.bf ? lossFl : 0)));
+  }
+  return result;
+}
+
+function pitThicknesses(prof, p, nx, xs, seedBase) {
+  var faces = prof.faces || {tf:true,web:true,bf:true};
+  var result={webT:[],tfT:[],bfT:[]};
+  var webLoss=[], tfLoss=[], bfLoss=[];
+  for (var i=0;i<nx;i++) { webLoss.push(0); tfLoss.push(0); bfLoss.push(0); }
+
+  function mkRand(seed) {
+    var t = seed >>> 0;
+    return function() {
+      t += 0x6D2B79F5;
+      var x = Math.imul(t ^ (t >>> 15), 1 | t);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function addFacePits(face, lossArr, faceDim, faceT, seedOff) {
+    if (!faces[face]) return;
+    var areaM2 = (p.L * faceDim) / 1e6;
+    var nPits = Math.max(1, Math.round(prof.den * areaM2));
+    nPits = Math.min(nPits, 3000);
+    var rnd = mkRand((seedBase+1)*2654435761 + seedOff);
+    for (var k=0;k<nPits;k++) {
+      var cx = rnd() * p.L;
+      var dia = (prof.type==='randpit') ? (Math.min(prof.dMin,prof.dMax) + rnd()*(Math.abs(prof.dMax-prof.dMin))) : prof.dia;
+      var r = Math.max(0.25, dia/2);
+      var depth;
+      if (prof.type==='randpit') {
+        var wl = Math.min(prof.wlMin,prof.wlMax) + rnd()*Math.abs(prof.wlMax-prof.wlMin);
+        depth = faceT * (wl/100);
+      } else {
+        depth = prof.fullWall ? faceT : prof.dep;
+      }
+      for (var xi=0;xi<nx;xi++) {
+        var x = (xs[xi]+xs[xi+1])/2, dx=Math.abs(x-cx);
+        if (dx>r) continue;
+        var local = depth * Math.sqrt(Math.max(0,1-(dx/r)*(dx/r)));
+        if (local > lossArr[xi]) lossArr[xi] = local;
+      }
+    }
+  }
+
+  addFacePits('web', webLoss, p.d, p.tw, 17);
+  addFacePits('tf',  tfLoss,  p.b, p.tf, 31);
+  addFacePits('bf',  bfLoss,  p.b, p.tf, 47);
+
+  for (var xi=0;xi<nx;xi++) {
+    result.webT.push(Math.max(0.5, p.tw - webLoss[xi]));
+    result.tfT.push(Math.max(0.5, p.tf - tfLoss[xi]));
+    result.bfT.push(Math.max(0.5, p.tf - bfLoss[xi]));
   }
   return result;
 }
@@ -1091,7 +1268,9 @@ function makeINP(prof, p, idx) {
   // For all other profiles a single global thickness per face is sufficient.
 
   var isZone = (prof.type === 'zone');
-  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : null;
+  var isPitDist = (prof.type === 'pitting' || prof.type === 'randpit');
+  var isDistributed = isZone || isPitDist;
+  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : (isPitDist ? pitThicknesses(prof, p, nx, xs, idx) : null);
 
   // Global effective thicknesses (used for non-zone profiles and header comments)
   var etf, etw, ebf;
@@ -1102,12 +1281,36 @@ function makeINP(prof, p, idx) {
   } else if (prof.type==='pitting') {
     var pitVol=Math.PI*Math.pow(prof.dia/2,2)*prof.dep;
     var equiv=pitVol/(1e6/prof.den);
+    var pf = prof.faces || {tf:true,web:true,bf:true};
     etf=p.tf; etw=p.tw; ebf=p.tf;
-    if (prof.loc==='web'||prof.loc==='all')     etw=Math.max(0.5,p.tw-equiv*3);
-    if (prof.loc==='flanges'||prof.loc==='all') { etf=Math.max(0.5,p.tf-equiv*2); ebf=etf; }
+    if (prof.fullWall) {
+      if (pf.web) etw=0.5;
+      if (pf.tf) etf=0.5;
+      if (pf.bf) ebf=0.5;
+    } else {
+      if (pf.web) etw=Math.max(0.5,p.tw-equiv*3);
+      if (pf.tf)  etf=Math.max(0.5,p.tf-equiv*2);
+      if (pf.bf)  ebf=Math.max(0.5,p.tf-equiv*2);
+    }
+  } else if (prof.type==='randpit') {
+    var dMin=Math.min(prof.dMin, prof.dMax), dMax=Math.max(prof.dMin, prof.dMax);
+    var dSqMean=(dMin*dMin + dMin*dMax + dMax*dMax)/3;
+    var wlMin=Math.min(prof.wlMin, prof.wlMax)/100, wlMax=Math.max(prof.wlMin, prof.wlMax)/100;
+    var rf = prof.faces || {tf:true,web:true,bf:true};
+    var equivW=(Math.PI*0.25*dSqMean*(((wlMin+wlMax)/2)*p.tw))/(1e6/prof.den);
+    var equivF=(Math.PI*0.25*dSqMean*(((wlMin+wlMax)/2)*p.tf))/(1e6/prof.den);
+    etf=p.tf; etw=p.tw; ebf=p.tf;
+    if (rf.web) etw=Math.max(0.5,p.tw-equivW*3);
+    if (rf.tf)  etf=Math.max(0.5,p.tf-equivF*2);
+    if (rf.bf)  ebf=Math.max(0.5,p.tf-equivF*2);
   } else if (prof.type==='zone') {
     // Report worst-case (inside zone) in header
-    etf=Math.max(0.5,p.tf-prof.inL); etw=Math.max(0.5,p.tw-prof.inL); ebf=etf;
+    var zf = prof.faces || {tf:true,web:true,bf:true};
+    var inWeb = prof.fullWall ? p.tw : prof.inL;
+    var inFl  = prof.fullWall ? p.tf : prof.inL;
+    etf=Math.max(0.5,p.tf-(zf.tf ? inFl : 0));
+    etw=Math.max(0.5,p.tw-(zf.web ? inWeb : 0));
+    ebf=Math.max(0.5,p.tf-(zf.bf ? inFl : 0));
   } else { // custom
     etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
   }
@@ -1161,6 +1364,13 @@ function makeINP(prof, p, idx) {
   if (isZone) {
     w('** Zone x=['+prof.x1+','+prof.x2+'] mm  loss_inside='+prof.inL+' mm  loss_outside='+prof.outL+' mm');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
+  } else if (isPitDist) {
+    w('** Pits are represented by grouped neighbouring element columns (curved pit profile in x).');
+    w('** Use finer mesh to better capture near-circular pit geometry in the INP model.');
+    w('** EFFECTIVE THICKNESSES (reported minima over all columns):');
+    w('**   TF_min = '+Math.min.apply(null,zt.tfT).toFixed(3)+' mm');
+    w('**   BF_min = '+Math.min.apply(null,zt.bfT).toFixed(3)+' mm');
+    w('**   WEB_min= '+Math.min.apply(null,zt.webT).toFixed(3)+' mm');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
     w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
@@ -1211,13 +1421,15 @@ function makeINP(prof, p, idx) {
   w('** thickness reflects the local corrosion level at that position.');
   if (isZone) {
     w('** Zone profile: inside=['+prof.x1+','+prof.x2+'] mm loss='+prof.inL+' mm  outside loss='+prof.outL+' mm');
+  } else if (isPitDist) {
+    w('** Pitting profile: per-column grouped neighbouring elements approximate pit footprints.');
   } else {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
   for (var xi=0;xi<nx;xi++) {
     var colLabel='COL-'+String(xi+1).padStart(3,'0');
     var twEff, tfEff, bfEff;
-    if (isZone) {
+    if (isDistributed) {
       twEff = zt.webT[xi]; tfEff = zt.tfT[xi]; bfEff = zt.bfT[xi];
     } else {
       twEff = etw; tfEff = etf; bfEff = ebf;
