@@ -3,7 +3,7 @@ import subprocess
 import tkinter as tk
 from tkinter import filedialog
 
-APP_VERSION = "2.0.0-wip"
+APP_VERSION = "1.1.0"
 
 # =========================
 # USER SETTINGS

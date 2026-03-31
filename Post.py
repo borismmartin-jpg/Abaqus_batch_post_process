@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import filedialog
 import numpy as np
 
-APP_VERSION = "2.0.0-wip"
+APP_VERSION = "1.1.0"
 
 # =========================
 # USER SETTINGS

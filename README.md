@@ -1,6 +1,6 @@
-# Abaqus Batch Post Process (Version 2.0.0-wip)
+# Abaqus Batch Post Process (Version 1.1.0)
 
-This repository is now prepared as **Version 2.0.0-wip** (work in progress).
+This repository is now prepared as **Version 1.1.0** (published release).
 
 ## What is included
 
@@ -10,8 +10,9 @@ This repository is now prepared as **Version 2.0.0-wip** (work in progress).
 
 ## Versioning
 
-- Current WIP version: **2.0.0-wip**
+- Current version: **1.1.0**
 - Source-of-truth version file: `VERSION`
+- **Version 1.0 is obsolete** and should no longer be used for new analyses.
 
 ## Prerequisites
 
