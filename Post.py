@@ -42,12 +42,20 @@ def safe_get_step(odb):
         return odb.steps[first_step_name]
 
 def prompt_for_folder(default_folder):
+    selected_folder = default_folder
     try:
-        folder_input = raw_input(f"Enter folder containing ODB files [default: {default_folder}]: ").strip()
-    except NameError:
-        folder_input = input(f"Enter folder containing ODB files [default: {default_folder}]: ").strip()
+        # Abaqus/CAE-safe prompt (avoids Python input/raw_input runtime issues).
+        fields = (("ODB folder", default_folder), )
+        values = getInputs(
+            fields=fields,
+            label="Select folder containing ODB files:",
+            dialogTitle="Abaqus Batch Post Process"
+        )
+        if values and len(values) > 0 and values[0].strip():
+            selected_folder = values[0].strip()
+    except Exception as e:
+        print(f"[WARNING] Folder prompt unavailable, using default folder. ({e})")
 
-    selected_folder = folder_input if folder_input else default_folder
     if not os.path.isdir(selected_folder):
         raise ValueError(f"Folder not found: {selected_folder}")
     return selected_folder
