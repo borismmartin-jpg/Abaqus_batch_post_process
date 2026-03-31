@@ -1463,6 +1463,8 @@ function makeINP(prof, p, idx) {
   wSec('ASSEMBLY NODE SETS');
   w('*Nset, nset=N-LEFT-SUPPORT,  instance=IBEAM-1');   wChunk(nLeft,16);
   w('*Nset, nset=N-RIGHT-SUPPORT, instance=IBEAM-1');   wChunk(nRight,16);
+  w('*Nset, nset=N-SUPPORT, instance=IBEAM-1');
+  wChunk(nLeft.concat(nRight),16);
   w('*Nset, nset=N-SYMMETRY,      instance=IBEAM-1');   wChunk(nSymIds,16);
   loadNsetsArr.forEach(function(ls){
     w('*Nset, nset=N-LOAD-'+ls.key+', instance=IBEAM-1'); wChunk(ls.ids,16);
@@ -1523,7 +1525,7 @@ function makeINP(prof, p, idx) {
   w('*Node Output');
   w('U, RF');
   w('*Element Output, directions=YES');
-  w('S, MISES, PEEQ, LE');
+  w('S, MISES, PEEQ, LE, STH');
 
   wSec('HISTORY OUTPUT  (every increment)');
   w('** Load-deflection at midspan');
@@ -1534,6 +1536,8 @@ function makeINP(prof, p, idx) {
   w('** Reactions at supports');
   w('*Output, history, frequency=1');
   w('*Node Output, nset=N-LEFT-SUPPORT'); w('RF1, RF2, RF3');
+  w('*Output, history, frequency=1');
+  w('*Node Output, nset=N-SUPPORT'); w('RF2');
   w('** Plasticity at critical elements');
   w('*Output, history, frequency=1');
   w('*Element Output, elset=IBEAM-1.E-BF-MIDSPAN'); w('MISES, PEEQ, S11');
