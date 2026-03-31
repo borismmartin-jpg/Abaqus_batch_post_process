@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abaqus I-Beam Generator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --bg:    #090f1a;  --surf:  #0f1825;  --surf2: #16212f;
+  --brd:   #1e3048;  --brd2:  #243a55;
+  --acc:   #00e5b4;  --acd:   rgba(0,229,180,.12);
+  --ora:   #ff7b3a;  --ord:   rgba(255,123,58,.12);
+  --blu:   #3a9eff;  --yel:   #ffd84a;  --red:   #ff4a6a;
+  --tx:    #cdd8e8;  --tx2:   #7a9ab8;  --tx3:   #3d5672;
+  --mono:  'JetBrains Mono', monospace;
+  --sans:  'Syne', sans-serif;
+}
+
+/* ── Reset & base ───────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--tx); font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; }
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+header { display: flex; align-items: center; gap: 14px; padding: 0 20px; height: 48px; background: var(--surf); border-bottom: 1px solid var(--brd); flex-shrink: 0; }
+.hbadge  { font-family: var(--sans); font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); background: var(--acd); border: 1px solid rgba(0,229,180,.3); padding: 3px 9px; }
+.htitle  { font-family: var(--sans); font-size: 13px; font-weight: 700; color: var(--tx); }
+.hsub    { font-size: 10px; color: var(--tx3); letter-spacing: .06em; }
+.hright  { margin-left: auto; display: flex; gap: 6px; }
+.hpill   { font-size: 9px; padding: 2px 8px; border: 1px solid var(--brd2); color: var(--tx3); letter-spacing: .1em; text-transform: uppercase; }
+
+/* ── App layout ─────────────────────────────────────────────────────────────── */
+.app { display: grid; grid-template-columns: 390px 1fr; flex: 1; overflow: hidden; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────────── */
+.sb { background: var(--surf); border-right: 1px solid var(--brd); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--brd2) transparent; }
+.sb::-webkit-scrollbar { width: 3px; }
+.sb::-webkit-scrollbar-thumb { background: var(--brd2); }
+.sec { border-bottom: 1px solid var(--brd); padding: 14px 16px; }
+.sechd { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.sechd::after { content: ''; flex: 1; height: 1px; background: var(--brd); }
+.secnum { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--acc); background: var(--acd); flex-shrink: 0; }
+.sectit { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--tx2); }
+
+/* ── Form controls ───────────────────────────────────────────────────────────── */
+.row  { display: grid; gap: 8px; margin-bottom: 8px; }
+.r1   { grid-template-columns: 1fr; }
+.r2   { grid-template-columns: 1fr 1fr; }
+.r3   { grid-template-columns: 1fr 1fr 1fr; }
+.fld  { display: flex; flex-direction: column; gap: 3px; }
+.fld label { font-size: 9px; color: var(--tx3); letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
+.fld input, .fld select { background: var(--bg); border: 1px solid var(--brd2); color: var(--tx); padding: 5px 8px; font-family: var(--mono); font-size: 11.5px; outline: none; width: 100%; transition: border-color .15s; -moz-appearance: textfield; appearance: none; }
+input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.fld input:focus, .fld select:focus { border-color: var(--acc); box-shadow: 0 0 0 2px rgba(0,229,180,.07); }
+.fld select { cursor: pointer; }
+.fld select option { background: var(--surf2); }
+.fld input.ov { border-color: var(--ora); color: var(--ora); }
+.ovnote { font-size: 9px; color: var(--ora); margin-bottom: 6px; display: none; }
+.ovnote.show { display: block; }
+.hint { font-size: 9.5px; color: var(--tx3); line-height: 1.55; margin: 4px 0 8px; }
+.hint b { color: var(--tx2); }
+
+/* ── Toggle buttons ─────────────────────────────────────────────────────────── */
+.tog { display: flex; border: 1px solid var(--brd2); margin-bottom: 10px; }
+.togbtn { flex: 1; padding: 8px 6px; background: transparent; border: none; border-right: 1px solid var(--brd2); color: var(--tx3); font-family: var(--mono); font-size: 10px; font-weight: 600; cursor: pointer; transition: all .15s; letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.togbtn:last-child { border-right: none; }
+.togbtn.a3 { background: var(--ord); color: var(--ora); }
+.togbtn.a4 { background: var(--acd); color: var(--acc); }
+
+/* ── Corrosion tab switcher ──────────────────────────────────────────────────── */
+.ctabs { display: flex; border: 1px solid var(--brd2); margin-bottom: 10px; }
+.ctab { flex: 1; padding: 6px 3px; background: transparent; border: none; border-right: 1px solid var(--brd2); color: var(--tx3); font-family: var(--mono); font-size: 9px; font-weight: 600; cursor: pointer; transition: all .15s; text-transform: uppercase; text-align: center; }
+.ctab:last-child { border-right: none; }
+.ctab.act { background: var(--ord); color: var(--ora); }
+.ctab:hover:not(.act) { color: var(--tx2); background: var(--surf2); }
+.cconf { display: none; }
+.cconf.act { display: block; }
+
+/* ── Profile list ────────────────────────────────────────────────────────────── */
+.plist { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; scrollbar-width: thin; scrollbar-color: var(--brd2) transparent; }
+.pitem { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--brd); padding: 5px 8px; cursor: pointer; transition: border-color .12s; }
+.pitem:hover { border-color: var(--brd2); }
+.pitem.sel  { border-color: var(--acc); background: var(--acd); }
+.pnum { font-size: 9px; color: var(--acc); font-weight: 700; min-width: 22px; }
+.plbl { flex: 1; font-size: 10px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptag { font-size: 8px; padding: 1px 5px; background: var(--surf2); color: var(--tx3); }
+.prm  { background: none; border: none; color: var(--tx3); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; transition: color .12s; }
+.prm:hover { color: var(--red); }
+
+/* ── Stats bar ───────────────────────────────────────────────────────────────── */
+.stats { display: grid; grid-template-columns: 1fr 1fr 1fr; border: 1px solid var(--brd2); margin-bottom: 10px; }
+.stat  { padding: 8px; text-align: center; border-right: 1px solid var(--brd2); }
+.stat:last-child { border-right: none; }
+.statv { font-family: var(--sans); font-size: 18px; font-weight: 700; color: var(--acc); line-height: 1; margin-bottom: 2px; }
+.statl { font-size: 8px; color: var(--tx3); text-transform: uppercase; letter-spacing: .1em; }
+
+/* ── Corrosion map ───────────────────────────────────────────────────────────── */
+.mapwrap { background: var(--bg); border: 1px solid var(--brd2); padding: 8px; margin-bottom: 8px; }
+.mapleg  { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.legit   { display: flex; align-items: center; gap: 4px; font-size: 8.5px; color: var(--tx3); }
+.legsw   { width: 14px; height: 6px; border: 1px solid var(--brd2); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+.btn  { padding: 7px 14px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; border: 1px solid; cursor: pointer; transition: all .15s; }
+.bacc { background: var(--acc); border-color: var(--acc); color: #000; }
+.bacc:hover { background: #00ffca; }
+.bout { background: transparent; border-color: var(--brd2); color: var(--tx3); }
+.bout:hover { border-color: var(--acc); color: var(--acc); }
+.bfull { width: 100%; }
+.brow  { display: flex; gap: 8px; }
+.bsm   { padding: 5px 10px; font-size: 9px; }
+
+/* ── Main code panel ─────────────────────────────────────────────────────────── */
+.main   { display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+.tbar   { display: flex; align-items: center; background: var(--surf); border-bottom: 1px solid var(--brd); flex-shrink: 0; overflow: hidden; }
+.tabbar { display: flex; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.tabbar::-webkit-scrollbar { display: none; }
+.otab   { padding: 10px 12px; font-size: 9.5px; font-family: var(--mono); font-weight: 500; background: transparent; border: none; border-right: 1px solid var(--brd); color: var(--tx3); cursor: pointer; white-space: nowrap; transition: all .12s; display: flex; align-items: center; gap: 5px; }
+.otab.act { background: var(--bg); color: var(--acc); }
+.otab:hover:not(.act) { color: var(--tx2); background: var(--surf2); }
+.tdot   { width: 5px; height: 5px; background: var(--acc); border-radius: 50%; flex-shrink: 0; }
+.tacts  { display: flex; border-left: 1px solid var(--brd); flex-shrink: 0; }
+.tbtn   { padding: 9px 14px; background: transparent; border: none; border-right: 1px solid var(--brd); color: var(--tx3); font-family: var(--mono); font-size: 9px; cursor: pointer; transition: all .12s; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.tbtn:last-child { border-right: none; }
+.tbtn:hover { color: var(--acc); background: var(--acd); }
+.tbtn.gen { background: var(--acc); color: #000; font-weight: 700; }
+.tbtn.gen:hover { background: #00ffca; }
+.ca { flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--brd2) transparent; }
+.ca::-webkit-scrollbar { width: 6px; height: 6px; }
+.ca::-webkit-scrollbar-thumb { background: var(--brd2); }
+
+/* ── Code view ───────────────────────────────────────────────────────────────── */
+pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16px 0; min-width: max-content; }
+.cl  { display: flex; min-height: 19.5px; }
+.cl:hover { background: rgba(255,255,255,.015); }
+.ln  { display: inline-block; min-width: 48px; text-align: right; padding-right: 14px; color: var(--tx3); font-size: 9.5px; user-select: none; border-right: 1px solid var(--brd); margin-right: 14px; flex-shrink: 0; opacity: .45; }
+.lc  { white-space: pre; flex: 1; padding-right: 24px; }
+.hc  { color: var(--tx3); }   /* comment */
+.hk  { color: var(--acc); font-weight: 600; }  /* keyword */
+.hn  { color: var(--yel); }   /* number */
+.hp  { color: var(--blu); }   /* param name */
+.hv  { color: var(--tx2); }   /* param value */
+
+/* ── Empty state ─────────────────────────────────────────────────────────────── */
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--tx3); }
+.embox { width: 72px; height: 72px; border: 1px solid var(--brd2); display: flex; align-items: center; justify-content: center; font-size: 30px; opacity: .3; }
+.empty p { font-size: 10.5px; text-align: center; line-height: 1.6; opacity: .4; max-width: 300px; }
+
+/* ── Toast notification ──────────────────────────────────────────────────────── */
+.notif { position: fixed; bottom: 18px; right: 18px; background: var(--surf2); border: 1px solid var(--acc); color: var(--acc); font-family: var(--mono); font-size: 10px; padding: 8px 16px; letter-spacing: .08em; opacity: 0; transform: translateY(8px); transition: all .2s; pointer-events: none; z-index: 999; }
+.notif.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════════════════════════ -->
+<header>
+  <div class="hbadge">FEA</div>
+  <div>
+    <div class="htitle">Abaqus I-Beam Generator</div>
+    <div class="hsub">3PT / 4PT Bending &bull; Load-to-Failure (Riks) &bull; Corrosion Profiles &bull; Standard Sections</div>
+  </div>
+  <div class="hright">
+    <span class="hpill">S4R Shell</span>
+    <span class="hpill">*.inp</span>
+  </div>
+</header>
+
+<div class="app">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="sb">
+
+  <!-- §1  Bending setup -->
+  <div class="sec">
+    <div class="sechd"><div class="secnum">1</div><div class="sectit">Bending Setup</div></div>
+    <div class="tog" id="bendTog">
+      <button class="togbtn a3" onclick="setBend('3pt')">3-Point<br><span style="font-size:8px;opacity:.6">MID LOAD</span></button>
+      <button class="togbtn"    onclick="setBend('4pt')">4-Point<br><span style="font-size:8px;opacity:.6">2 LOADS</span></button>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--brd2);padding:8px;margin-bottom:10px">
+      <svg id="bsvg" viewBox="0 0 340 100" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+    <div class="row r2">
+      <div class="fld"><label>Span L (mm)</label><input type="number" id="iL" value="2000" step="50" oninput="onP()"></div>
+      <div class="fld" id="awrap"><label>Load offset a (mm)</label><input type="number" id="iA" value="600" step="50" oninput="onP()"></div>
+    </div>
+    <div class="hint" id="bhint"></div>
+  </div>
+
+  <!-- §2  Section -->
+  <div class="sec">
+    <div class="sechd"><div class="secnum">2</div><div class="sectit">I-Section (UB / UC)</div></div>
+    <div class="row r2" style="margin-bottom:8px">
+      <div class="fld">
+        <label>Standard section</label>
+        <select id="iStd" onchange="loadStd()">
+          <option value="">- Custom -</option>
+          <optgroup label="Universal Beams (UB)">
+            <option value="127x76x13">127×76×13 UB</option>
+            <option value="152x89x16">152×89×16 UB</option>
+            <option value="203x102x23">203×102×23 UB</option>
+            <option value="203x133x25" selected>203×133×25 UB</option>
+            <option value="254x146x31">254×146×31 UB</option>
+            <option value="254x146x37">254×146×37 UB</option>
+            <option value="305x127x42">305×127×42 UB</option>
+            <option value="305x165x40">305×165×40 UB</option>
+            <option value="305x165x54">305×165×54 UB</option>
+            <option value="356x171x45">356×171×45 UB</option>
+            <option value="356x171x57">356×171×57 UB</option>
+            <option value="406x178x54">406×178×54 UB</option>
+            <option value="406x178x67">406×178×67 UB</option>
+            <option value="457x152x60">457×152×60 UB</option>
+            <option value="457x191x74">457×191×74 UB</option>
+            <option value="457x191x82">457×191×82 UB</option>
+            <option value="533x210x82">533×210×82 UB</option>
+            <option value="533x210x101">533×210×101 UB</option>
+            <option value="610x229x101">610×229×101 UB</option>
+            <option value="610x229x125">610×229×125 UB</option>
+            <option value="610x305x149">610×305×149 UB</option>
+            <option value="610x305x179">610×305×179 UB</option>
+            <option value="610x305x238">610×305×238 UB</option>
+          </optgroup>
+          <optgroup label="Universal Columns (UC)">
+            <option value="152x152x23UC">152×152×23 UC</option>
+            <option value="152x152x30UC">152×152×30 UC</option>
+            <option value="203x203x46UC">203×203×46 UC</option>
+            <option value="203x203x60UC">203×203×60 UC</option>
+            <option value="254x254x73UC">254×254×73 UC</option>
+            <option value="254x254x89UC">254×254×89 UC</option>
+            <option value="305x305x97UC">305×305×97 UC</option>
+            <option value="305x305x118UC">305×305×118 UC</option>
+          </optgroup>
+        </select>
+      </div>
+      <div style="display:flex;align-items:flex-end"><button class="btn bout bsm" onclick="resetStd()">Reset</button></div>
+    </div>
+    <div class="ovnote" id="ovnote">Override: values differ from standard section</div>
+    <div class="row r2">
+      <div class="fld"><label>Depth d (mm)</label><input type="number" id="iD" value="203" step="1" oninput="markOv()"></div>
+      <div class="fld"><label>Flange width b (mm)</label><input type="number" id="iB" value="133" step="1" oninput="markOv()"></div>
+    </div>
+    <div class="row r2">
+      <div class="fld"><label>Flange tf (mm)</label><input type="number" id="iTF" value="7.8" step="0.1" oninput="markOv()"></div>
+      <div class="fld"><label>Web tw (mm)</label><input type="number" id="iTW" value="5.7" step="0.1" oninput="markOv()"></div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--brd2);padding:8px;margin-top:4px">
+      <svg id="xssvg" viewBox="0 0 200 150" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </div>
+
+  <!-- §3  Material -->
+  <div class="sec">
+    <div class="sechd"><div class="secnum">3</div><div class="sectit">Material</div></div>
+    <div class="row r2">
+      <div class="fld"><label>E (MPa)</label><input type="number" id="iE" value="200000" step="1000"></div>
+      <div class="fld"><label>Poisson ν</label><input type="number" id="iNu" value="0.3" step="0.01" min="0" max="0.499"></div>
+    </div>
+    <div class="row r3">
+      <div class="fld"><label>fy (MPa)</label><input type="number" id="iFy" value="275" step="5"></div>
+      <div class="fld"><label>fu (MPa)</label><input type="number" id="iFu" value="430" step="5"></div>
+      <div class="fld"><label>εu (%)</label><input type="number" id="iEu" value="20" step="1"></div>
+    </div>
+    <div class="hint">Riks arc-length method traces elastic→plastic→collapse. The step runs until peak LPF or max increments are exhausted.</div>
+  </div>
+
+  <!-- §4  Mesh & Step -->
+  <div class="sec">
+    <div class="sechd"><div class="secnum">4</div><div class="sectit">Mesh &amp; Step</div></div>
+    <div class="row r2">
+      <div class="fld"><label>Element size (mm)</label><input type="number" id="iMesh" value="50" step="10" min="5" oninput="onP()"></div>
+      <div class="fld"><label>Max increments</label><input type="number" id="iMaxI" value="200" step="10" min="10"></div>
+    </div>
+    <div class="row r2">
+      <div class="fld">
+        <label>Initial arc increment</label>
+        <input type="number" id="iLF" value="0.01" step="0.005" min="0.001">
+        <div class="hint" style="margin:3px 0 0">Fraction of total arc length taken in the first increment. <b>Smaller</b> (0.005–0.02) = finer initial step, better for brittle or sharp bifurcations. <b>Larger</b> (0.05–0.1) = faster but may overshoot yield. Riks adapts automatically after increment 1.</div>
+      </div>
+      <div class="fld"><label>Total load P (kN)</label><input type="number" id="iPtot" value="100" step="10" min="1"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="statv" id="stN">-</div><div class="statl">Nodes</div></div>
+      <div class="stat"><div class="statv" id="stE">-</div><div class="statl">Elements</div></div>
+      <div class="stat"><div class="statv" id="stP">0</div><div class="statl">Profiles</div></div>
+    </div>
+  </div>
+
+  <!-- §5  Corrosion Profiles -->
+  <div class="sec">
+    <div class="sechd"><div class="secnum">5</div><div class="sectit">Corrosion Profiles</div></div>
+    <div class="ctabs">
+      <button class="ctab act" onclick="setCT('uniform')">Uniform</button>
+      <button class="ctab"     onclick="setCT('pitting')">Pitting</button>
+      <button class="ctab"     onclick="setCT('girder')">Web/Flange</button>
+      <button class="ctab"     onclick="setCT('zone')">Zone</button>
+      <button class="ctab"     onclick="setCT('custom')">Custom</button>
+    </div>
+
+    <!-- Uniform -->
+    <div class="cconf act" id="cf-uniform">
+      <svg viewBox="0 0 340 72" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-bottom:8px">
+        <rect x="10" y="10" width="320" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="10" y="30" width="320" height="32" fill="#1d5487" opacity=".6"/>
+        <rect x="10" y="50" width="320" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="10" y="16" width="320" height="6"  fill="#ff4a6a" opacity=".55"/>
+        <rect x="10" y="30" width="320" height="32" fill="#ff7b3a" opacity=".25"/>
+        <rect x="10" y="50" width="320" height="6"  fill="#ff4a6a" opacity=".55"/>
+        <line x1="270" y1="10" x2="270" y2="22" stroke="#00e5b4" stroke-width="1.2" marker-end="url(#uarr)"/>
+        <text x="276" y="18" fill="#00e5b4" font-size="7" font-family="JetBrains Mono">loss (all faces)</text>
+        <defs><marker id="uarr" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker></defs>
+        <text x="6" y="18" fill="#7a9ab8" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">TF</text>
+        <text x="6" y="47" fill="#7a9ab8" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">WEB</text>
+        <text x="6" y="59" fill="#7a9ab8" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">BF</text>
+      </svg>
+      <div class="hint">Uniform thickness reduction on <b>all faces</b> along the full beam length. Generate a sweep by setting Min → Max over N steps.</div>
+      <div class="row r3">
+        <div class="fld"><label>Min loss (mm)</label><input type="number" id="umin" value="0"  step="0.5" min="0"></div>
+        <div class="fld"><label>Max loss (mm)</label><input type="number" id="umax" value="4"  step="0.5"></div>
+        <div class="fld"><label>Steps N</label>       <input type="number" id="un"   value="5"  step="1" min="1" max="20"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addUniform()">+ Add Range</button>
+    </div>
+
+    <!-- Pitting -->
+    <div class="cconf" id="cf-pitting">
+      <svg viewBox="0 0 340 80" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-bottom:8px">
+        <defs>
+          <marker id="pa" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="pab" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="pay" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+          <marker id="payb" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+        </defs>
+        <rect x="10" y="8"  width="60" height="8"  fill="#3a9eff" opacity=".7"/>
+        <rect x="30" y="16" width="20" height="44" fill="#1d5487" opacity=".7"/>
+        <rect x="10" y="60" width="60" height="8"  fill="#3a9eff" opacity=".7"/>
+        <circle cx="28" cy="28" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="46" cy="42" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="34" cy="54" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <line x1="52" y1="42" x2="56" y2="42" stroke="#00e5b4" stroke-width="1" marker-end="url(#pa)"/>
+        <line x1="40" y1="42" x2="44" y2="42" stroke="#00e5b4" stroke-width="1" marker-end="url(#pab)"/>
+        <text x="58" y="45" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono">depth</text>
+        <line x1="24" y1="22" x2="28" y2="22" stroke="#ffd84a" stroke-width="1" marker-end="url(#pay)"/>
+        <line x1="28" y1="22" x2="24" y2="22" stroke="#ffd84a" stroke-width="1" marker-end="url(#payb)"/>
+        <line x1="28" y1="22" x2="32" y2="22" stroke="#ffd84a" stroke-width="1" marker-end="url(#pay)"/>
+        <text x="33" y="21" fill="#ffd84a" font-size="6.5" font-family="JetBrains Mono">dia</text>
+        <text x="40" y="6"  fill="#7a9ab8" font-size="6"   font-family="JetBrains Mono" text-anchor="middle">Cross-section</text>
+        <rect x="110" y="30" width="220" height="20" fill="#1d5487" opacity=".6"/>
+        <circle cx="150" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="185" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="220" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="255" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="290" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="167" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="202" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <circle cx="237" cy="40" r="4" fill="none" stroke="#ff7b3a" stroke-width="1"/>
+        <text x="220" y="26" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="middle">Plan (web face) — pits smeared to equiv. thickness loss</text>
+        <text x="110" y="62" fill="#3d5672" font-size="6.5" font-family="JetBrains Mono">density = pits / m²</text>
+      </svg>
+      <div class="hint">Pitting converted to a <b>smeared equivalent thickness loss</b> = pit volume × density. Applied to web, flanges, or all faces.</div>
+      <div class="row r2">
+        <div class="fld"><label>Pit depth (mm)</label>    <input type="number" id="pdep" value="2.5" step="0.5" min="0.1"></div>
+        <div class="fld"><label>Pit diameter (mm)</label> <input type="number" id="pdia" value="12"  step="1"   min="1"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Density (pits/m²)</label><input type="number" id="pden" value="800" step="100"></div>
+        <div class="fld"><label>Apply to</label>
+          <select id="ploc">
+            <option value="web">Web only</option>
+            <option value="flanges">Flanges only</option>
+            <option value="all">All faces</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn bout bfull" onclick="addPitting()">+ Add Pitting Profile</button>
+    </div>
+
+    <!-- Web/Flange (Girder) -->
+    <div class="cconf" id="cf-girder">
+      <svg viewBox="0 0 340 90" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-bottom:8px">
+        <defs>
+          <marker id="ga"  markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="gab" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="gao" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#ff7b3a"/></marker>
+          <marker id="gaob" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#ff7b3a"/></marker>
+          <marker id="gay" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+          <marker id="gayb" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+        </defs>
+        <rect x="30" y="8"  width="80" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="62" y="20" width="16" height="50" fill="#1d5487" opacity=".7"/>
+        <rect x="30" y="70" width="80" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="30" y="14" width="80" height="6"  fill="#00e5b4" opacity=".45"/>
+        <rect x="62" y="20" width="16" height="50" fill="#ff7b3a" opacity=".30"/>
+        <rect x="30" y="70" width="80" height="6"  fill="#ffd84a" opacity=".45"/>
+        <line x1="18" y1="8"  x2="18" y2="20" stroke="#00e5b4" stroke-width="1.1" marker-start="url(#gab)" marker-end="url(#ga)"/>
+        <text x="16" y="15" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">TF loss</text>
+        <line x1="55" y1="45" x2="78" y2="45" stroke="#ff7b3a" stroke-width="1.1" marker-start="url(#gaob)" marker-end="url(#gao)"/>
+        <text x="70" y="43" fill="#ff7b3a" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">web loss</text>
+        <line x1="18" y1="70" x2="18" y2="82" stroke="#ffd84a" stroke-width="1.1" marker-start="url(#gayb)" marker-end="url(#gay)"/>
+        <text x="16" y="78" fill="#ffd84a" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">BF loss</text>
+        <text x="70" y="6" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="middle">Cross-section</text>
+        <rect x="150" y="8"  width="180" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="150" y="20" width="180" height="50" fill="#1d5487" opacity=".6"/>
+        <rect x="150" y="70" width="180" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="150" y="14" width="180" height="6"  fill="#00e5b4" opacity=".35"/>
+        <rect x="150" y="20" width="180" height="50" fill="#ff7b3a" opacity=".20"/>
+        <rect x="150" y="70" width="180" height="6"  fill="#ffd84a" opacity=".35"/>
+        <text x="240" y="6" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="middle">Elevation — uniform along full length</text>
+        <text x="148" y="16" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="end">TF</text>
+        <text x="148" y="47" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="end">WEB</text>
+        <text x="148" y="78" fill="#7a9ab8" font-size="6" font-family="JetBrains Mono" text-anchor="end">BF</text>
+      </svg>
+      <div class="hint">Independent thickness loss on each face, <b>uniform along the full beam length</b>. TF loss acts on the inner (bottom) face; BF loss on the inner (top) face.</div>
+      <div class="row r3">
+        <div class="fld"><label>Top flange loss (mm)</label><input type="number" id="gtf" value="1.0" step="0.25" min="0"></div>
+        <div class="fld"><label>Web loss (mm)</label>       <input type="number" id="gw"  value="2.0" step="0.25" min="0"></div>
+        <div class="fld"><label>Bot flange loss (mm)</label><input type="number" id="gbf" value="0.5" step="0.25" min="0"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addGirder()">+ Add Web/Flange Profile</button>
+    </div>
+
+    <!-- Zone -->
+    <div class="cconf" id="cf-zone">
+      <svg viewBox="0 0 340 80" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-bottom:8px">
+        <rect x="10"  y="20" width="320" height="10" fill="#3a9eff" opacity=".6"/>
+        <rect x="10"  y="30" width="320" height="28" fill="#1d5487" opacity=".5"/>
+        <rect x="10"  y="58" width="320" height="10" fill="#3a9eff" opacity=".6"/>
+        <rect x="10"  y="20" width="90"  height="48" fill="#00e5b4" opacity=".12"/>
+        <rect x="240" y="20" width="90"  height="48" fill="#00e5b4" opacity=".12"/>
+        <rect x="100" y="20" width="140" height="48" fill="#ff7b3a" opacity=".30"/>
+        <line x1="100" y1="14" x2="100" y2="70" stroke="#00e5b4" stroke-width="1" stroke-dasharray="3,2"/>
+        <line x1="240" y1="14" x2="240" y2="70" stroke="#00e5b4" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="100" y="12" fill="#00e5b4" font-size="7" font-family="JetBrains Mono" text-anchor="middle">x1</text>
+        <text x="240" y="12" fill="#00e5b4" font-size="7" font-family="JetBrains Mono" text-anchor="middle">x2</text>
+        <text x="10"  y="73" fill="#3d5672" font-size="6.5" font-family="JetBrains Mono">x=0</text>
+        <text x="330" y="73" fill="#3d5672" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">x=L</text>
+        <text x="170" y="42" fill="#ff7b3a" font-size="7" font-family="JetBrains Mono" text-anchor="middle">loss inside zone</text>
+        <text x="55"  y="45" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">loss outside</text>
+        <text x="283" y="45" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">loss outside</text>
+      </svg>
+      <div class="hint">Concentrated loss within a <b>longitudinal zone [x1→x2]</b> applied to all faces. Each element column gets its own <b>*Shell Section</b> so thickness varies correctly along the beam. A lower background loss applies outside the zone (set to 0 for none).</div>
+      <div class="row r2">
+        <div class="fld"><label>Zone start x1 (mm)</label><input type="number" id="zx1" value="500"  step="50"></div>
+        <div class="fld"><label>Zone end x2 (mm)</label>  <input type="number" id="zx2" value="1500" step="50"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Loss inside zone (mm)</label> <input type="number" id="zin"  value="3.0" step="0.5"  min="0"></div>
+        <div class="fld"><label>Loss outside zone (mm)</label><input type="number" id="zout" value="0.5" step="0.25" min="0"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addZone()">+ Add Zone Profile</button>
+    </div>
+
+    <!-- Custom -->
+    <div class="cconf" id="cf-custom">
+      <svg viewBox="0 0 340 72" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-bottom:8px">
+        <defs>
+          <marker id="ca2"  markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="ca2b" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#00e5b4"/></marker>
+          <marker id="ca2o"  markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#ff7b3a"/></marker>
+          <marker id="ca2ob" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#ff7b3a"/></marker>
+          <marker id="ca2y"  markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+          <marker id="ca2yb" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto-start-reverse"><path d="M0,0 L5,2.5 L0,5Z" fill="#ffd84a"/></marker>
+        </defs>
+        <rect x="60"  y="6"  width="100" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="98"  y="18" width="24"  height="40" fill="#1d5487" opacity=".7"/>
+        <rect x="60"  y="58" width="100" height="12" fill="#3a9eff" opacity=".7"/>
+        <rect x="60"  y="12" width="100" height="6"  fill="#00e5b4" opacity=".5"/>
+        <rect x="98"  y="18" width="24"  height="40" fill="#ff7b3a" opacity=".35"/>
+        <rect x="60"  y="58" width="100" height="6"  fill="#ffd84a" opacity=".5"/>
+        <line x1="50" y1="6"  x2="50" y2="18" stroke="#00e5b4" stroke-width="1.1" marker-start="url(#ca2b)" marker-end="url(#ca2)"/>
+        <text x="48" y="13" fill="#00e5b4" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">TF loss</text>
+        <line x1="90" y1="38" x2="122" y2="38" stroke="#ff7b3a" stroke-width="1.1" marker-start="url(#ca2ob)" marker-end="url(#ca2o)"/>
+        <text x="106" y="36" fill="#ff7b3a" font-size="6.5" font-family="JetBrains Mono" text-anchor="middle">web loss</text>
+        <line x1="50" y1="58" x2="50" y2="70" stroke="#ffd84a" stroke-width="1.1" marker-start="url(#ca2yb)" marker-end="url(#ca2y)"/>
+        <text x="48" y="66" fill="#ffd84a" font-size="6.5" font-family="JetBrains Mono" text-anchor="end">BF loss</text>
+        <text x="185" y="24" fill="#3d5672" font-size="7" font-family="JetBrains Mono">Enter thickness loss</text>
+        <text x="185" y="35" fill="#3d5672" font-size="7" font-family="JetBrains Mono">per face (mm).</text>
+        <text x="185" y="49" fill="#3d5672" font-size="7" font-family="JetBrains Mono">Uniform along full</text>
+        <text x="185" y="60" fill="#3d5672" font-size="7" font-family="JetBrains Mono">beam length.</text>
+      </svg>
+      <div class="hint">Fully manual: independent loss per face, <b>uniform along the full beam length</b>.</div>
+      <div class="row r1"><div class="fld"><label>Profile name</label><input type="text" id="cnm" placeholder="e.g. Splash-50yr"></div></div>
+      <div class="row r3">
+        <div class="fld"><label>Top flange loss (mm)</label><input type="number" id="ctf" value="0" step="0.1" min="0"></div>
+        <div class="fld"><label>Web loss (mm)</label>       <input type="number" id="cw"  value="0" step="0.1" min="0"></div>
+        <div class="fld"><label>Bot flange loss (mm)</label><input type="number" id="cbf" value="0" step="0.1" min="0"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addCustom()">+ Add Custom</button>
+    </div>
+
+    <div style="height:1px;background:var(--brd);margin:10px 0"></div>
+    <div style="font-size:9px;color:var(--tx3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Corrosion Map — click profile to preview</div>
+    <div class="mapwrap"><canvas id="cmap" width="350" height="140" style="width:100%;display:block"></canvas></div>
+    <div class="mapleg" id="mleg"></div>
+    <div style="height:1px;background:var(--brd);margin:10px 0"></div>
+    <div class="plist" id="plist"><div style="color:var(--tx3);text-align:center;padding:14px;font-size:10px">No profiles added yet</div></div>
+    <div class="brow">
+      <button class="btn bout" style="flex:1" onclick="clearAll()">Clear</button>
+      <button class="btn bacc" style="flex:2" onclick="genAll()">Generate All</button>
+    </div>
+  </div><!-- end §5 -->
+
+</div><!-- end sidebar -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MAIN CODE PANEL
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="main">
+  <div class="tbar">
+    <div class="tabbar" id="tabbar"></div>
+    <div class="tacts">
+      <button class="tbtn" onclick="dlCur()">Download Current</button>
+      <button class="tbtn" onclick="dlAll()">Download All</button>
+      <button class="tbtn gen" onclick="genAll()">Generate *.inp</button>
+    </div>
+  </div>
+  <div class="ca" id="ca">
+    <div class="empty">
+      <div class="embox">FEA</div>
+      <p>Configure geometry and add corrosion profiles, then click <b style="color:var(--acc)">Generate</b> to produce Abaqus *.inp files.</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- end app -->
+<div class="notif" id="notif"></div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+var bendMode  = '3pt';
+var profiles  = [];
+var generated = {};
+var activeFile = null;
+var selIdx    = -1;
+var isOv      = false;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STANDARD SECTIONS  (d, b, tf, tw in mm)
+// ═══════════════════════════════════════════════════════════════════════════════
+var STD = {
+  '127x76x13':     {d:127,  b:76,  tf:7.6,  tw:4.0},
+  '152x89x16':     {d:152,  b:89,  tf:7.7,  tw:4.5},
+  '203x102x23':    {d:203,  b:102, tf:9.3,  tw:5.4},
+  '203x133x25':    {d:203,  b:133, tf:7.8,  tw:5.7},
+  '254x146x31':    {d:251,  b:146, tf:8.6,  tw:6.0},
+  '254x146x37':    {d:256,  b:146, tf:10.9, tw:6.3},
+  '305x127x42':    {d:307,  b:124, tf:12.1, tw:8.0},
+  '305x165x40':    {d:303,  b:165, tf:10.2, tw:6.0},
+  '305x165x54':    {d:310,  b:166, tf:13.7, tw:7.9},
+  '356x171x45':    {d:351,  b:171, tf:9.7,  tw:7.0},
+  '356x171x57':    {d:358,  b:172, tf:13.0, tw:8.1},
+  '406x178x54':    {d:403,  b:177, tf:10.9, tw:7.7},
+  '406x178x67':    {d:410,  b:178, tf:14.3, tw:8.8},
+  '457x152x60':    {d:454,  b:152, tf:13.3, tw:8.1},
+  '457x191x74':    {d:457,  b:190, tf:14.5, tw:9.0},
+  '457x191x82':    {d:460,  b:191, tf:16.0, tw:9.9},
+  '533x210x82':    {d:528,  b:208, tf:13.2, tw:9.6},
+  '533x210x101':   {d:536,  b:210, tf:17.4, tw:10.8},
+  '610x229x101':   {d:602,  b:227, tf:14.8, tw:10.5},
+  '610x229x125':   {d:612,  b:229, tf:19.6, tw:11.9},
+  '610x305x149':   {d:612,  b:304, tf:19.7, tw:11.8},
+  '610x305x179':   {d:620,  b:307, tf:23.6, tw:14.1},
+  '610x305x238':   {d:635,  b:311, tf:31.4, tw:18.4},
+  '152x152x23UC':  {d:152,  b:152, tf:6.8,  tw:5.1},
+  '152x152x30UC':  {d:157,  b:152, tf:9.4,  tw:6.6},
+  '203x203x46UC':  {d:203,  b:203, tf:11.0, tw:7.2},
+  '203x203x60UC':  {d:210,  b:205, tf:14.2, tw:9.4},
+  '254x254x73UC':  {d:254,  b:254, tf:14.2, tw:8.6},
+  '254x254x89UC':  {d:260,  b:255, tf:17.3, tw:10.3},
+  '305x305x97UC':  {d:307,  b:304, tf:15.4, tw:9.9},
+  '305x305x118UC': {d:314,  b:307, tf:18.7, tw:12.0}
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOM HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+function gv(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function gs(id) { return document.getElementById(id).value; }
+function sv(id, v) { document.getElementById(id).value = v; }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+function loadStd() {
+  var k = gs('iStd');
+  if (!k || !STD[k]) { isOv = false; updOv(); return; }
+  var s = STD[k];
+  sv('iD', s.d); sv('iB', s.b); sv('iTF', s.tf); sv('iTW', s.tw);
+  isOv = false; updOv(); onP();
+}
+function markOv() { if (gs('iStd')) { isOv = true; updOv(); } onP(); }
+function resetStd() { sv('iStd', ''); isOv = false; updOv(); }
+function updOv() {
+  document.getElementById('ovnote').classList.toggle('show', isOv);
+  ['iD','iB','iTF','iTW'].forEach(function(id) {
+    document.getElementById(id).classList.toggle('ov', isOv);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PARAMETERS
+// ═══════════════════════════════════════════════════════════════════════════════
+function getP() {
+  var d = gv('iD') || 203, b = gv('iB') || 133;
+  var tf = gv('iTF') || 7.8, tw = gv('iTW') || 5.7;
+  return {
+    L: gv('iL') || 2000, a: gv('iA') || 600,
+    d: d, b: b, tf: tf, tw: tw, hw: d - 2*tf,
+    E: gv('iE') || 200000, nu: gv('iNu') || 0.3,
+    fy: gv('iFy') || 275, fu: gv('iFu') || 430, eu: gv('iEu') || 20,
+    mesh: gv('iMesh') || 50, maxI: gv('iMaxI') || 200,
+    initLF: gv('iLF') || 0.01, Ptot: gv('iPtot') || 100,
+    rho: 7.85e-9
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UI REACTIVITY
+// ═══════════════════════════════════════════════════════════════════════════════
+function onP() { drawBend(); drawXS(); updStats(); updHint(); if (selIdx >= 0 && profiles[selIdx]) drawMap(profiles[selIdx]); }
+
+function updStats() {
+  var p = getP();
+  var nx  = Math.max(4, Math.ceil(p.L / p.mesh));
+  var nyW = Math.max(2, Math.ceil(p.d / p.mesh));
+  var nzF = Math.max(4, Math.ceil(p.b / p.mesh));
+  var midZi = Math.floor(nzF / 2);
+  var nzL = midZi, nzR = nzF - midZi;
+  var nodes = (nx+1)*(nyW+1) + (nx+1)*(nzL+nzR)*2;
+  var elems = nx * (nyW + nzF*2);
+  document.getElementById('stN').textContent = nodes > 999 ? (nodes/1000).toFixed(1)+'k' : nodes;
+  document.getElementById('stE').textContent = elems > 999 ? (elems/1000).toFixed(1)+'k' : elems;
+  document.getElementById('stP').textContent = profiles.length;
+}
+
+function updHint() {
+  var p = getP(), h = document.getElementById('bhint');
+  if (bendMode === '3pt') {
+    h.innerHTML = 'Load at <b>x=' + (p.L/2) + ' mm</b>. M_max = P·L/4.';
+  } else {
+    h.innerHTML = 'Loads at <b>x=' + p.a + ' mm</b> and <b>x=' + (p.L-p.a) + ' mm</b>. Pure bending zone = ' + (p.L-2*p.a) + ' mm.';
+  }
+}
+
+function setBend(m) {
+  bendMode = m;
+  document.querySelectorAll('#bendTog .togbtn').forEach(function(b, i) {
+    b.className = 'togbtn' + (i===0&&m==='3pt' ? ' a3' : i===1&&m==='4pt' ? ' a4' : '');
+  });
+  document.getElementById('awrap').style.display = m === '4pt' ? '' : 'none';
+  onP();
+}
+
+function setCT(t) {
+  var tabs = ['uniform','pitting','girder','zone','custom'];
+  document.querySelectorAll('.ctab').forEach(function(b,i) { b.classList.toggle('act', tabs[i]===t); });
+  document.querySelectorAll('.cconf').forEach(function(c) { c.classList.remove('act'); });
+  document.getElementById('cf-'+t).classList.add('act');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SVG DIAGRAMS
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawBend() {
+  var p = getP(), svg = document.getElementById('bsvg');
+  var bx=28, ex=312, beamY=48, beamH=18, suppH=10, bLen=ex-bx;
+  var cOra='#ff7b3a', cAcc='#00e5b4', cBlu='#3a9eff', cDim='#1e3048', cTxt='#3d5672';
+  var loads = bendMode==='3pt' ? [{x:bx+bLen*0.5}] : [{x:bx+bLen*(p.a/p.L)},{x:bx+bLen*(1-p.a/p.L)}];
+  var zone = '';
+  if (bendMode==='4pt' && loads.length===2) {
+    zone = '<rect x="'+loads[0].x+'" y="'+(beamY-beamH/2)+'" width="'+(loads[1].x-loads[0].x)+'" height="'+beamH+'" fill="rgba(0,229,180,.06)"/>';
+  }
+  var arrows = loads.map(function(l) {
+    return '<line x1="'+l.x+'" y1="'+(beamY-beamH/2-22)+'" x2="'+l.x+'" y2="'+(beamY-beamH/2-3)+'" stroke="'+cOra+'" stroke-width="1.5" marker-end="url(#alo)"/>'
+         + '<text x="'+l.x+'" y="'+(beamY-beamH/2-26)+'" fill="'+cOra+'" font-size="9" text-anchor="middle" font-family="JetBrains Mono" font-weight="700">P</text>';
+  }).join('');
+  var dy = beamY+beamH/2+suppH+14;
+  svg.innerHTML =
+    '<defs><marker id="alo" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7Z" fill="'+cOra+'"/></marker></defs>'
+    + zone
+    + '<rect x="'+bx+'" y="'+(beamY-beamH/2)+'"   width="'+bLen+'" height="3"          fill="'+cBlu+'" opacity=".9"/>'
+    + '<rect x="'+bx+'" y="'+(beamY+beamH/2-3)+'" width="'+bLen+'" height="3"          fill="'+cBlu+'" opacity=".9"/>'
+    + '<rect x="'+bx+'" y="'+(beamY-beamH/2+3)+'" width="'+bLen+'" height="'+(beamH-6)+'" fill="'+cBlu+'" opacity=".2"/>'
+    + '<polygon points="'+bx+','+(beamY+beamH/2)+' '+(bx-8)+','+(beamY+beamH/2+suppH)+' '+(bx+8)+','+(beamY+beamH/2+suppH)+'" fill="'+cAcc+'" opacity=".85"/>'
+    + '<polygon points="'+ex+','+(beamY+beamH/2)+' '+(ex-8)+','+(beamY+beamH/2+suppH)+' '+(ex+8)+','+(beamY+beamH/2+suppH)+'" fill="'+cAcc+'" opacity=".85"/>'
+    + arrows
+    + '<line x1="'+bx+'" y1="'+dy+'" x2="'+ex+'" y2="'+dy+'" stroke="'+cDim+'" stroke-width=".7"/>'
+    + '<line x1="'+bx+'" y1="'+(dy-4)+'" x2="'+bx+'" y2="'+(dy+4)+'" stroke="'+cDim+'" stroke-width=".7"/>'
+    + '<line x1="'+ex+'" y1="'+(dy-4)+'" x2="'+ex+'" y2="'+(dy+4)+'" stroke="'+cDim+'" stroke-width=".7"/>'
+    + '<text x="'+(bx+ex)/2+'" y="'+(dy+11)+'" fill="'+cTxt+'" font-size="8.5" text-anchor="middle" font-family="JetBrains Mono">L = '+p.L+' mm</text>';
+}
+
+function drawXS() {
+  var p = getP(), svg = document.getElementById('xssvg');
+  var W=200, H=150, sc=Math.min(W*0.65/p.b, H*0.68/p.d);
+  var sw=p.b*sc, sh=p.d*sc, stf=p.tf*sc, stw=p.tw*sc, cx=W/2, cy=H/2+2;
+  svg.innerHTML =
+    '<rect x="'+(cx-sw/2)+'" y="'+(cy-sh/2)+'"      width="'+sw+'"  height="'+stf+'"        fill="#3a9eff" opacity=".85"/>'
+    + '<rect x="'+(cx-sw/2)+'" y="'+(cy+sh/2-stf)+'" width="'+sw+'"  height="'+stf+'"        fill="#3a9eff" opacity=".85"/>'
+    + '<rect x="'+(cx-stw/2)+'" y="'+(cy-sh/2+stf)+'" width="'+stw+'" height="'+(sh-2*stf)+'" fill="#1d5487" opacity=".75"/>'
+    + '<text x="'+cx+'"          y="'+(cy-sh/2-14)+'"  fill="#3d5672" font-size="7.5" text-anchor="middle"  font-family="JetBrains Mono">'+p.b+' mm</text>'
+    + '<text x="'+(cx+sw/2+18)+'" y="'+(cy+3)+'"       fill="#3d5672" font-size="7.5" text-anchor="middle"  font-family="JetBrains Mono" transform="rotate(90,'+(cx+sw/2+18)+','+cy+')">'+p.d+' mm</text>'
+    + '<text x="'+(cx-sw/2-3)+'" y="'+(cy-sh/2+stf/2+3)+'" fill="#00e5b4" font-size="7" font-family="JetBrains Mono" text-anchor="end">tf='+p.tf+'</text>'
+    + '<text x="'+(cx+stw/2+3)+'" y="'+(cy+3)+'"      fill="#00e5b4" font-size="7" font-family="JetBrains Mono">tw='+p.tw+'</text>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CORROSION LOSS SAMPLING  (used by corrosion map preview)
+// ═══════════════════════════════════════════════════════════════════════════════
+function getLoss(prof, xFrac, zone) {
+  if (!prof) return 0;
+  var p = getP(), xMm = xFrac * p.L;
+  switch (prof.type) {
+    case 'uniform': return prof.loss;
+    case 'pitting': {
+      var eq = Math.PI * Math.pow(prof.dia/2,2) * prof.dep / (1e6/prof.den);
+      if (zone==='web'    && (prof.loc==='web'    ||prof.loc==='all')) return eq*3;
+      if ((zone==='tf'||zone==='bf') && (prof.loc==='flanges'||prof.loc==='all')) return eq*2;
+      return 0;
+    }
+    case 'girder':
+      if (zone==='web') return prof.webL;
+      if (zone==='tf')  return prof.tfL;
+      if (zone==='bf')  return prof.bfL;
+      return 0;
+    case 'zone':
+      return (xMm>=prof.x1 && xMm<=prof.x2) ? prof.inL : prof.outL;
+    case 'custom':
+      if (zone==='tf')  return prof.tfL;
+      if (zone==='web') return prof.wL;
+      if (zone==='bf')  return prof.bfL;
+      return 0;
+  }
+  return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CORROSION MAP CANVAS
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawMap(prof) {
+  var cv = document.getElementById('cmap'), ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height, p = getP();
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#09111e'; ctx.fillRect(0,0,W,H);
+
+  var PAD_L=28, PAD_R=10, PAD_T=10, PAD_B=22;
+  var bx=PAD_L, ex=W-PAD_R, by=PAD_T, ey=H-PAD_B;
+  var bLen=ex-bx, bH=ey-by;
+
+  var tfFrac  = Math.min(0.30, (p.tf/p.d)*1.8);
+  var bfFrac  = Math.min(0.30, (p.tf/p.d)*1.8);
+  var webFrac = 1 - tfFrac - bfFrac;
+  var tfH=bH*tfFrac, bfH=bH*bfFrac, webH=bH*webFrac;
+  var tfY=by, webY=by+tfH, bfY=by+tfH+webH;
+
+  // Sample max loss across beam for colour scale
+  var NS=120, maxL=0.001;
+  for (var i=0; i<=NS; i++) {
+    var f=i/NS;
+    maxL = Math.max(maxL, getLoss(prof,f,'tf'), getLoss(prof,f,'web'), getLoss(prof,f,'bf'));
+  }
+
+  function lossColour(l) {
+    if (l < 0.001) return null;
+    var t = Math.min(1, l/maxL);
+    return 'rgba('+Math.round(40+215*t)+','+Math.round(120*(1-t))+','+Math.round(180*(1-t))+',0.92)';
+  }
+
+  // Base steel
+  ctx.fillStyle = '#0e2035';
+  ctx.fillRect(bx, tfY,  bLen, tfH);
+  ctx.fillRect(bx, webY, bLen, webH);
+  ctx.fillRect(bx, bfY,  bLen, bfH);
+
+  // Corrosion overlay (strip by strip)
+  var sw = bLen/NS + 0.6;
+  for (var xi=0; xi<NS; xi++) {
+    var xf=xi/NS, px=bx+xf*bLen;
+    var cTF=lossColour(getLoss(prof,xf,'tf')), cWEB=lossColour(getLoss(prof,xf,'web')), cBF=lossColour(getLoss(prof,xf,'bf'));
+    if (cTF)  { var h=Math.min(tfH, (getLoss(prof,xf,'tf')/p.tf)*tfH);   ctx.fillStyle=cTF;  ctx.fillRect(px,tfY+tfH-h,sw,h); }
+    if (cWEB) { ctx.fillStyle=cWEB; ctx.fillRect(px,webY,sw,webH); }
+    if (cBF)  { var h2=Math.min(bfH,(getLoss(prof,xf,'bf')/p.tf)*bfH);  ctx.fillStyle=cBF;  ctx.fillRect(px,bfY,sw,h2); }
+  }
+
+  // Section outlines
+  ctx.strokeStyle='#2a4a6a'; ctx.lineWidth=0.7;
+  ctx.strokeRect(bx,tfY,bLen,tfH); ctx.strokeRect(bx,webY,bLen,webH); ctx.strokeRect(bx,bfY,bLen,bfH);
+  ctx.strokeStyle='#1e3048'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(bx,webY); ctx.lineTo(ex,webY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(bx,bfY);  ctx.lineTo(ex,bfY);  ctx.stroke();
+
+  // Zone boundaries
+  if (prof && prof.type==='zone') {
+    var zx1=bx+(prof.x1/p.L)*bLen, zx2=bx+(prof.x2/p.L)*bLen;
+    ctx.strokeStyle='rgba(0,229,180,0.5)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
+    [zx1,zx2].forEach(function(zx){ ctx.beginPath(); ctx.moveTo(zx,by-2); ctx.lineTo(zx,ey); ctx.stroke(); });
+    ctx.fillStyle='rgba(0,229,180,0.04)'; ctx.fillRect(zx1,by,zx2-zx1,bH);
+    ctx.setLineDash([]);
+    if (zx2-zx1>20) { ctx.fillStyle='rgba(0,229,180,0.5)'; ctx.font='6.5px JetBrains Mono'; ctx.textAlign='center'; ctx.fillText('ZONE',(zx1+zx2)/2,by+7); }
+  }
+
+  // Load point markers
+  ctx.setLineDash([3,3]); ctx.strokeStyle='#ff7b3a'; ctx.lineWidth=1.3;
+  var lxs = bendMode==='3pt' ? [p.L/2] : [p.a,p.L-p.a];
+  lxs.forEach(function(lx) {
+    var px=bx+(lx/p.L)*bLen;
+    ctx.beginPath(); ctx.moveTo(px,by-2); ctx.lineTo(px,ey); ctx.stroke();
+    ctx.fillStyle='#ff7b3a';
+    ctx.beginPath(); ctx.moveTo(px,tfY); ctx.lineTo(px-4,tfY-7); ctx.lineTo(px+4,tfY-7); ctx.closePath(); ctx.fill();
+    ctx.font='bold 7px JetBrains Mono'; ctx.textAlign='center'; ctx.fillText('P',px,by-1);
+  });
+  ctx.setLineDash([]);
+
+  // Y-axis labels
+  ctx.fillStyle='#3d5672'; ctx.font='7px JetBrains Mono'; ctx.textAlign='right';
+  ctx.fillText('TF',  bx-3, tfY+tfH/2+3);
+  ctx.fillText('WEB', bx-3, webY+webH/2+3);
+  ctx.fillText('BF',  bx-3, bfY+bfH/2+3);
+
+  // X-axis ticks
+  ctx.fillStyle='#3d5672'; ctx.font='6.5px JetBrains Mono'; ctx.textAlign='center';
+  [0.25,0.5,0.75].forEach(function(f) {
+    var px=bx+f*bLen;
+    ctx.fillStyle='#1e3048'; ctx.fillRect(px-0.5,ey,1,3);
+    ctx.fillStyle='#3d5672'; ctx.fillText(Math.round(f*p.L)+'',px,ey+PAD_B-10);
+  });
+  ctx.textAlign='left';  ctx.fillText('0',   bx,  ey+PAD_B-10);
+  ctx.textAlign='right'; ctx.fillText(p.L+' mm',ex,ey+PAD_B-10);
+
+  // Colour scale bar
+  var sbW=60, sbH=5, sbX=ex-sbW, sbY=ey+PAD_B-8;
+  var gr=ctx.createLinearGradient(sbX,0,sbX+sbW,0);
+  gr.addColorStop(0,'rgba(40,120,180,0.92)'); gr.addColorStop(0.5,'rgba(200,60,50,0.92)'); gr.addColorStop(1,'rgba(255,0,0,0.92)');
+  ctx.fillStyle=gr; ctx.fillRect(sbX,sbY,sbW,sbH);
+  ctx.strokeStyle='#1e3048'; ctx.lineWidth=0.5; ctx.strokeRect(sbX,sbY,sbW,sbH);
+  ctx.fillStyle='#3d5672'; ctx.font='6.5px JetBrains Mono';
+  ctx.textAlign='left';  ctx.fillText('0 mm',   sbX,      sbY-2);
+  ctx.textAlign='right'; ctx.fillText(maxL.toFixed(2)+' mm', sbX+sbW, sbY-2);
+
+  document.getElementById('mleg').innerHTML =
+    '<div class="legit"><div class="legsw" style="background:#0e2035;border-color:#2a4a6a"></div>No loss</div>' +
+    '<div class="legit"><div class="legsw" style="background:rgba(150,40,130,0.9)"></div>Moderate</div>' +
+    '<div class="legit"><div class="legsw" style="background:rgba(255,0,0,0.9)"></div>Max ' + maxL.toFixed(2) + ' mm</div>' +
+    '<div class="legit" style="color:var(--ora)">▼ Load point</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROFILE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+function addUniform() {
+  var mn=gv('umin'), mx=gv('umax'), n=Math.max(1,Math.round(gv('un')));
+  for (var i=0;i<n;i++) {
+    var loss = n===1 ? mn : parseFloat((mn+(mx-mn)*i/(n-1)).toFixed(3));
+    profiles.push({type:'uniform',loss:loss,label:'UNI_'+loss+'mm',desc:'Uniform loss '+loss+' mm'});
+  }
+  refresh();
+}
+function addPitting() {
+  var dep=gv('pdep'),dia=gv('pdia'),den=gv('pden'),loc=gs('ploc');
+  profiles.push({type:'pitting',dep:dep,dia:dia,den:den,loc:loc,
+    label:'PIT_d'+dep+'_D'+dia+'_'+loc,
+    desc:'Pitting depth='+dep+' mm dia='+dia+' mm density='+den+'/m² loc='+loc});
+  refresh();
+}
+function addGirder() {
+  var tf=gv('gtf'),w=gv('gw'),bf=gv('gbf');
+  profiles.push({type:'girder',tfL:tf,webL:w,bfL:bf,
+    label:'GIRD_TF'+tf+'W'+w+'BF'+bf,
+    desc:'Girder: TF='+tf+' mm web='+w+' mm BF='+bf+' mm'});
+  refresh();
+}
+function addZone() {
+  var x1=gv('zx1'),x2=gv('zx2'),inL=gv('zin'),outL=gv('zout');
+  profiles.push({type:'zone',x1:x1,x2:x2,inL:inL,outL:outL,
+    label:'ZONE_'+x1+'-'+x2+'_'+inL+'mm',
+    desc:'Zone x=['+x1+','+x2+'] mm inside='+inL+' mm outside='+outL+' mm'});
+  refresh();
+}
+function addCustom() {
+  var nm=gs('cnm').trim()||('CUST_'+profiles.length),tf=gv('ctf'),w=gv('cw'),bf=gv('cbf');
+  profiles.push({type:'custom',tfL:tf,wL:w,bfL:bf,label:nm,
+    desc:'Custom: TF='+tf+' mm web='+w+' mm BF='+bf+' mm'});
+  refresh();
+}
+function removeProf(i,e) {
+  e.stopPropagation(); profiles.splice(i,1);
+  if (selIdx>=profiles.length) selIdx=profiles.length-1;
+  refresh();
+}
+function selProf(i) {
+  selIdx=i;
+  document.querySelectorAll('.pitem').forEach(function(el,j){el.classList.toggle('sel',j===i);});
+  drawMap(profiles[i]);
+}
+function clearAll() {
+  profiles=[]; generated={}; activeFile=null; selIdx=-1; refresh();
+  document.getElementById('tabbar').innerHTML='';
+  document.getElementById('ca').innerHTML='<div class="empty"><div class="embox">FEA</div><p>Configure geometry and add corrosion profiles, then click <b style="color:var(--acc)">Generate</b> to produce Abaqus *.inp files.</p></div>';
+  var ctx=document.getElementById('cmap').getContext('2d'); ctx.clearRect(0,0,350,140);
+  document.getElementById('mleg').innerHTML='';
+}
+function refresh() {
+  var el=document.getElementById('plist');
+  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',custom:'CST'};
+  el.innerHTML = profiles.length
+    ? profiles.map(function(p,i){
+        return '<div class="pitem'+(i===selIdx?' sel':'')+'" onclick="selProf('+i+')">'
+          +'<span class="pnum">#'+String(i+1).padStart(2,'0')+'</span>'
+          +'<span class="plbl">'+p.label+'</span>'
+          +'<span class="ptag">'+(tags[p.type]||'?')+'</span>'
+          +'<button class="prm" onclick="removeProf('+i+',event)">×</button>'
+          +'</div>';
+      }).join('')
+    : '<div style="color:var(--tx3);text-align:center;padding:14px;font-size:10px">No profiles added yet</div>';
+  updStats();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INP GENERATOR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/* Split an array of IDs into rows of at most n items (Abaqus limit = 16) */
+function chunkList(ids, n) {
+  var rows=[];
+  for (var i=0;i<ids.length;i+=n) rows.push(ids.slice(i,i+n).join(', '));
+  return rows;
+}
+
+/*
+ * Compute per-element effective thicknesses for a zone profile.
+ * Returns an object with arrays:
+ *   webT[xi]  – effective web thickness at longitudinal column xi
+ *   tfT[xi]   – effective TF thickness
+ *   bfT[xi]   – effective BF thickness
+ * For non-zone profiles a single global thickness is used instead.
+ */
+function zoneThicknesses(prof, p, nx, xs) {
+  var result={webT:[],tfT:[],bfT:[]};
+  for (var xi=0;xi<nx;xi++) {
+    // Element centre x = midpoint of column xi
+    var xc = (xs[xi]+xs[xi+1])/2;
+    var inside = (xc>=prof.x1 && xc<=prof.x2);
+    var loss = inside ? prof.inL : prof.outL;
+    result.webT.push(Math.max(0.5, p.tw - loss));
+    result.tfT.push(Math.max(0.5, p.tf - loss));
+    result.bfT.push(Math.max(0.5, p.tf - loss));
+  }
+  return result;
+}
+
+function makeINP(prof, p, idx) {
+
+  // ── Mesh counts ────────────────────────────────────────────────────────────
+  var nx   = Math.max(4, Math.ceil(p.L / p.mesh));  // longitudinal divisions
+  var nyW  = Math.max(2, Math.ceil(p.d / p.mesh));  // web height divisions
+  var nzF  = Math.max(4, Math.ceil(p.b / p.mesh));  // flange width divisions
+  var midZi = Math.floor(nzF / 2);                  // z-index of web centreline
+  var nzL  = midZi;                                 // left flange half-columns
+  var nzR  = nzF - midZi;                           // right flange half-columns
+
+  // ── Coordinate arrays ──────────────────────────────────────────────────────
+  var xs=[], ysW=[], zsF=[];
+  for (var i=0;i<=nx; i++) xs.push(  parseFloat((i*p.L/nx).toFixed(4)));
+  for (var i=0;i<=nyW;i++) ysW.push( parseFloat((i*p.d/nyW).toFixed(4)));
+  for (var i=0;i<=nzF;i++) zsF.push( parseFloat((i*p.b/nzF).toFixed(4)));
+  var yTF  = parseFloat(p.d.toFixed(4));
+  var zMid = parseFloat((p.b/2).toFixed(4));
+
+  // ── Node ID scheme ─────────────────────────────────────────────────────────
+  //
+  //  Web       : nodes at z=zMid, y=ysW[0..nyW]
+  //              webNid(xi,0) = bottom junction (shared with BF centreline)
+  //              webNid(xi,nyW) = top junction (shared with TF centreline)
+  //  TF left   : nodes at y=yTF, z=zsF[0..midZi-1]   (excludes centre)
+  //  TF right  : nodes at y=yTF, z=zsF[midZi+1..nzF] (excludes centre)
+  //  BF left   : nodes at y=0,   z=zsF[0..midZi-1]
+  //  BF right  : nodes at y=0,   z=zsF[midZi+1..nzF]
+  //
+  //  tfNid / bfNid route zi==midZi to the shared web junction node,
+  //  so the mesh is conformally connected — no tie constraints needed.
+
+  var webBase  = 1;
+  var tfLBase  = webBase + (nx+1)*(nyW+1);
+  var tfRBase  = tfLBase + (nx+1)*nzL;
+  var bfLBase  = tfRBase + (nx+1)*nzR;
+  var bfRBase  = bfLBase + (nx+1)*nzL;
+  var totalNodes = bfRBase + (nx+1)*nzR - 1;
+
+  function webNid(xi,yi) { return webBase + xi*(nyW+1) + yi; }
+  function tfLNid(xi,li) { return tfLBase + xi*nzL + li; }
+  function tfRNid(xi,ri) { return tfRBase + xi*nzR + ri; }
+  function bfLNid(xi,li) { return bfLBase + xi*nzL + li; }
+  function bfRNid(xi,ri) { return bfRBase + xi*nzR + ri; }
+
+  function tfNid(xi,zi) {
+    if (zi < midZi)   return tfLNid(xi, zi);
+    if (zi === midZi) return webNid(xi, nyW);     // shared top junction
+    return tfRNid(xi, zi-midZi-1);
+  }
+  function bfNid(xi,zi) {
+    if (zi < midZi)   return bfLNid(xi, zi);
+    if (zi === midZi) return webNid(xi, 0);        // shared bottom junction
+    return bfRNid(xi, zi-midZi-1);
+  }
+
+  // ── Emit nodes ─────────────────────────────────────────────────────────────
+  var nodeLines=[], nid=1;
+  for (var xi=0;xi<=nx; xi++) for (var yi=0;yi<=nyW;yi++) nodeLines.push(nid+++', '+xs[xi]+', '+ysW[yi]+', '+zMid);
+  for (var xi=0;xi<=nx; xi++) for (var li=0;li<nzL; li++) nodeLines.push(nid+++', '+xs[xi]+', '+yTF+', '+zsF[li]);
+  for (var xi=0;xi<=nx; xi++) for (var ri=1;ri<=nzR;ri++) nodeLines.push(nid+++', '+xs[xi]+', '+yTF+', '+zsF[midZi+ri]);
+  for (var xi=0;xi<=nx; xi++) for (var li=0;li<nzL; li++) nodeLines.push(nid+++', '+xs[xi]+', 0.0000, '+zsF[li]);
+  for (var xi=0;xi<=nx; xi++) for (var ri=1;ri<=nzR;ri++) nodeLines.push(nid+++', '+xs[xi]+', 0.0000, '+zsF[midZi+ri]);
+
+  // ── Emit elements ──────────────────────────────────────────────────────────
+  var elemLines=[], eid=1;
+  var webES=1;
+  for (var xi=0;xi<nx;xi++) for (var yi=0;yi<nyW;yi++)
+    elemLines.push(eid+++', '+webNid(xi,yi)+', '+webNid(xi+1,yi)+', '+webNid(xi+1,yi+1)+', '+webNid(xi,yi+1));
+  var webEE=eid-1, tfES=eid;
+  for (var xi=0;xi<nx;xi++) for (var zi=0;zi<nzF;zi++)
+    elemLines.push(eid+++', '+tfNid(xi,zi)+', '+tfNid(xi+1,zi)+', '+tfNid(xi+1,zi+1)+', '+tfNid(xi,zi+1));
+  var tfEE=eid-1, bfES=eid;
+  for (var xi=0;xi<nx;xi++) for (var zi=0;zi<nzF;zi++)
+    elemLines.push(eid+++', '+bfNid(xi,zi)+', '+bfNid(xi+1,zi)+', '+bfNid(xi+1,zi+1)+', '+bfNid(xi,zi+1));
+  var bfEE=eid-1, totalElems=bfEE;
+
+  // ── Key node sets ──────────────────────────────────────────────────────────
+  var midXi = Math.max(0, Math.min(nx, Math.round((p.L/2)/(p.L/nx))));
+
+  // Symmetry plane (x = L/2): all nodes at midXi
+  var nSymIds=[];
+  for (var yi=0;yi<=nyW;yi++) nSymIds.push(webNid(midXi,yi));
+  for (var zi=0;zi<midZi;zi++) { nSymIds.push(tfNid(midXi,zi)); nSymIds.push(bfNid(midXi,zi)); }
+  for (var zi=midZi+1;zi<=nzF;zi++) { nSymIds.push(tfNid(midXi,zi)); nSymIds.push(bfNid(midXi,zi)); }
+  nSymIds.push(tfNid(midXi,midZi)); // = webNid(midXi,nyW), already added via web loop – OK (duplicates ignored by Abaqus)
+  nSymIds.push(bfNid(midXi,midZi));
+
+  // Left support: full bottom-flange cross-section at x=0
+  var nLeft=[];
+  for (var zi=0;zi<=nzF;zi++) nLeft.push(bfNid(0,zi));
+
+  // Right support: full bottom-flange cross-section at x=L (not needed with symmetry model,
+  // kept for full-span models — symmetry BC replaces the right "roller")
+  var nRight=[];
+  for (var zi=0;zi<=nzF;zi++) nRight.push(bfNid(nx,zi));
+
+  // Midspan bottom flange (output)
+  var nMidBot=[];
+  for (var zi=0;zi<=nzF;zi++) nMidBot.push(bfNid(midXi,zi));
+
+  // Neutral axis midspan (output)
+  var nMidNeut=[webNid(midXi, Math.floor(nyW/2))];
+
+  // Monitor node: bottom flange centreline at midspan
+  var monitorNode = bfNid(midXi, midZi); // = webNid(midXi,0) due to shared node
+
+  // Load nsets: top flange cross-section at each load x
+  var loadXs = bendMode==='3pt' ? [p.L/2] : [p.a, p.L-p.a];
+  var loadNsetsArr=[];
+  loadXs.forEach(function(lx) {
+    var xi=Math.max(0,Math.min(nx,Math.round(lx/(p.L/nx))));
+    var key=Math.round(lx), ids=[];
+    for (var zi=0;zi<=nzF;zi++) ids.push(tfNid(xi,zi));
+    loadNsetsArr.push({key:key, ids:ids});
+  });
+
+  // Output element sets (near midspan / load point)
+  var mxi=Math.max(0,midXi-1);
+  var lxi=Math.max(0,Math.round(loadXs[0]/(p.L/nx))-1);
+  var eBFids=[], eTFids=[], eWEBids=[];
+  for (var k=0;k<nzF;k++) { eBFids.push(bfES+mxi*nzF+k); eTFids.push(tfES+mxi*nzF+k); }
+  for (var k=0;k<nyW;k++) eWEBids.push(webES+lxi*nyW+k);
+
+  // ── Shell thicknesses ──────────────────────────────────────────────────────
+  //
+  // For zone profiles we assign a separate *Shell Section per longitudinal
+  // column of elements so that thickness varies correctly along the beam.
+  // For all other profiles a single global thickness per face is sufficient.
+
+  var isZone = (prof.type === 'zone');
+  var zt = isZone ? zoneThicknesses(prof, p, nx, xs) : null;
+
+  // Global effective thicknesses (used for non-zone profiles and header comments)
+  var etf, etw, ebf;
+  if (prof.type==='uniform') {
+    etf=Math.max(0.5,p.tf-prof.loss); etw=Math.max(0.5,p.tw-prof.loss); ebf=etf;
+  } else if (prof.type==='girder') {
+    etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.webL); ebf=Math.max(0.5,p.tf-prof.bfL);
+  } else if (prof.type==='pitting') {
+    var pitVol=Math.PI*Math.pow(prof.dia/2,2)*prof.dep;
+    var equiv=pitVol/(1e6/prof.den);
+    etf=p.tf; etw=p.tw; ebf=p.tf;
+    if (prof.loc==='web'||prof.loc==='all')     etw=Math.max(0.5,p.tw-equiv*3);
+    if (prof.loc==='flanges'||prof.loc==='all') { etf=Math.max(0.5,p.tf-equiv*2); ebf=etf; }
+  } else if (prof.type==='zone') {
+    // Report worst-case (inside zone) in header
+    etf=Math.max(0.5,p.tf-prof.inL); etw=Math.max(0.5,p.tw-prof.inL); ebf=etf;
+  } else { // custom
+    etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
+  }
+
+  // ── Load parameters ────────────────────────────────────────────────────────
+  var nNodesPerLoad  = nzF + 1;
+  var totalLoadNodes = loadXs.length * nNodesPerLoad;
+  var PtotN          = p.Ptot * 1000;             // kN → N
+  var loadPerNode    = PtotN / totalLoadNodes;
+
+  // ── Plastic material table ─────────────────────────────────────────────────
+  var euF=p.eu/100;
+  var plasticRows=[
+    p.fy.toFixed(1)+', 0.0',
+    p.fy.toFixed(1)+', 0.020',
+    (p.fy+(p.fu-p.fy)*0.25).toFixed(1)+', 0.050',
+    (p.fy+(p.fu-p.fy)*0.60).toFixed(1)+', '+(euF*0.45).toFixed(4),
+    p.fu.toFixed(1)+', '+(euF*0.90).toFixed(4),
+    (p.fu*1.01).toFixed(1)+', '+euF.toFixed(4)
+  ];
+
+  // ── Misc header values ─────────────────────────────────────────────────────
+  var testType = bendMode==='3pt' ? 'Three-Point Bending (3PB)' : 'Four-Point Bending (4PB)';
+  var fileNum  = String(idx+1).padStart(2,'0');
+  var date     = new Date().toISOString().slice(0,10);
+  var sectKey  = gs('iStd') || 'Custom';
+
+  // ── Output builder ─────────────────────────────────────────────────────────
+  var out=[];
+  function w(s)         { out.push(s===undefined ? '' : String(s)); }
+  function wChunk(ids,n){ chunkList(ids,n).forEach(function(row){out.push(row);}); }
+  function wSec(title)  { w('**'); w('** ── '+title+' ──────────────────────────────────────────────'); }
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  FILE HEADER                                                            ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  w('** ================================================================');
+  w('** Abaqus/Standard Input File — I-Beam Load-to-Failure (Riks)');
+  w('** ================================================================');
+  w('** File    : '+fileNum+'_'+prof.label+'.inp');
+  w('** Date    : '+date);
+  w('** Section : '+sectKey+(isOv?' [OVERRIDDEN]':''));
+  w('** Test    : '+testType);
+  w('** Mesh    : S4R shell   Nodes='+totalNodes+'   Elements='+totalElems);
+  w('**');
+  w('** GEOMETRY:');
+  w('**   d='+p.d+' mm   b='+p.b+' mm   tf='+p.tf+' mm   tw='+p.tw+' mm   L='+p.L+' mm');
+  w('**');
+  w('** CORROSION PROFILE : '+(prof.desc||prof.label));
+  if (isZone) {
+    w('** Zone x=['+prof.x1+','+prof.x2+'] mm  loss_inside='+prof.inL+' mm  loss_outside='+prof.outL+' mm');
+    w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
+  } else {
+    w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
+    w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
+    w('**   BF = '+ebf.toFixed(3)+' mm  (loss='+(p.tf-ebf).toFixed(3)+' mm, '+((p.tf-ebf)/p.tf*100).toFixed(1)+'%)');
+    w('**   WEB= '+etw.toFixed(3)+' mm  (loss='+(p.tw-etw).toFixed(3)+' mm, '+((p.tw-etw)/p.tw*100).toFixed(1)+'%)');
+    w('**   → Assigned via per-column element sets (WEB/TF/BF-COL-NNN)');
+  }
+  w('**');
+  w('** LOADING : '+testType+'   load x = '+loadXs.join(', ')+' mm');
+  w('** TARGET  : P_total = '+p.Ptot+' kN   ('+loadPerNode.toFixed(2)+' N/node × '+totalLoadNodes+' nodes)');
+  w('**           LPF = 1.0 corresponds to P_total; step continues past 1.0 to capture post-peak');
+  w('**');
+  w('** BOUNDARY CONDITIONS (full-span model):');
+  w('**   Left support  x=0 : U1=U2=U3=0  (pin — fully fixed translations)');
+  w('**   Right support x=L : U1=U2=U3=0  (roller — fully fixed translations)');
+  w('**');
+  w('** MATERIAL : E='+p.E+' MPa   ν='+p.nu+'   fy='+p.fy+' MPa   fu='+p.fu+' MPa   εu='+p.eu+'%');
+  w('** ================================================================');
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  PART                                                                   ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  w('*Heading');
+  w(fileNum+'_'+prof.label+' — I-Beam '+testType);
+  w('*Part, name=IBEAM');
+
+  wSec('NODES');
+  w('*Node');
+  nodeLines.forEach(function(l){w(l);});
+
+  wSec('ELEMENTS  (S4R reduced-integration shell)');
+  w('*Element, type=S4R');
+  elemLines.forEach(function(l){w(l);});
+
+  wSec('ELEMENT SETS');
+  w('** Full-face sets (reference / output only — sections use per-column sets below)');
+  w('*Elset, elset=WEB-ALL, generate'); w(webES+', '+webEE+', 1');
+  w('*Elset, elset=TF-ALL,  generate'); w(tfES +', '+tfEE +', 1');
+  w('*Elset, elset=BF-ALL,  generate'); w(bfES +', '+bfEE +', 1');
+  w('** Output element sets');
+  w('*Elset, elset=E-BF-MIDSPAN'); wChunk(eBFids,16);
+  w('*Elset, elset=E-TF-MIDSPAN'); wChunk(eTFids,16);
+  w('*Elset, elset=E-WEB-LOADPT'); wChunk(eWEBids,16);
+
+  wSec('SHELL SECTIONS  (element distribution by corrosion level)');
+  w('** Elements are grouped into longitudinal columns.');
+  w('** Each column is assigned its own *Shell Section so that');
+  w('** thickness reflects the local corrosion level at that position.');
+  if (isZone) {
+    w('** Zone profile: inside=['+prof.x1+','+prof.x2+'] mm loss='+prof.inL+' mm  outside loss='+prof.outL+' mm');
+  } else {
+    w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
+  }
+  for (var xi=0;xi<nx;xi++) {
+    var colLabel='COL-'+String(xi+1).padStart(3,'0');
+    var twEff, tfEff, bfEff;
+    if (isZone) {
+      twEff = zt.webT[xi]; tfEff = zt.tfT[xi]; bfEff = zt.bfT[xi];
+    } else {
+      twEff = etw; tfEff = etf; bfEff = ebf;
+    }
+    // Web column elements
+    var wColES = webES + xi*nyW, wColEE = webES + (xi+1)*nyW - 1;
+    w('*Elset, elset=WEB-'+colLabel+', generate'); w(wColES+', '+wColEE+', 1');
+    w('*Shell Section, elset=WEB-'+colLabel+', material=STEEL');
+    w(twEff.toFixed(4)+', 5');
+    // TF column elements
+    var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
+    w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
+    w('*Shell Section, elset=TF-'+colLabel+', material=STEEL');
+    w(tfEff.toFixed(4)+', 5');
+    // BF column elements
+    var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
+    w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
+    w('*Shell Section, elset=BF-'+colLabel+', material=STEEL');
+    w(bfEff.toFixed(4)+', 5');
+  }
+
+  w('*End Part');
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  ASSEMBLY                                                               ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  w('*Assembly, name=ASSEMBLY');
+  w('*Instance, name=IBEAM-1, part=IBEAM');
+  w('*End Instance');
+
+  wSec('ASSEMBLY NODE SETS');
+  w('*Nset, nset=N-LEFT-SUPPORT,  instance=IBEAM-1');   wChunk(nLeft,16);
+  w('*Nset, nset=N-RIGHT-SUPPORT, instance=IBEAM-1');   wChunk(nRight,16);
+  w('*Nset, nset=N-SYMMETRY,      instance=IBEAM-1');   wChunk(nSymIds,16);
+  loadNsetsArr.forEach(function(ls){
+    w('*Nset, nset=N-LOAD-'+ls.key+', instance=IBEAM-1'); wChunk(ls.ids,16);
+  });
+  w('*Nset, nset=N-MIDSPAN-BOT,  instance=IBEAM-1');   wChunk(nMidBot,16);
+  w('*Nset, nset=N-MIDSPAN-NEUT, instance=IBEAM-1');   wChunk(nMidNeut,16);
+
+  w('*End Assembly');
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  MATERIAL                                                               ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  wSec('MATERIAL');
+  w('*Material, name=STEEL');
+  w('*Elastic');   w(p.E+', '+p.nu);
+  w('*Density');   w(p.rho+',');
+  w('*Plastic');   plasticRows.forEach(function(r){w(r);});
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  BOUNDARY CONDITIONS                                                    ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  wSec('BOUNDARY CONDITIONS');
+  w('** Left support at x=0 — PIN: U1=U2=U3=0');
+  w('**   U1=axial(x)  U2=vertical(y)  U3=lateral(z)');
+  w('*Boundary');
+  w('N-LEFT-SUPPORT, 1, 3, 0.0');
+  w('** Right support at x=L — ROLLER: U1=U2=U3=0');
+  w('**   (All three translations fixed; rotations remain free)');
+  w('*Boundary');
+  w('N-RIGHT-SUPPORT, 1, 3, 0.0');
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  STEP — LOAD-TO-FAILURE (Riks)                                          ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  wSec('STEP: LOAD-TO-FAILURE');
+  w('** Riks arc-length method — nlgeom for large-displacement effects');
+  w('** Initial arc increment : '+p.initLF+' (fraction of total arc length)');
+  w('** Min arc increment     : 1e-7   (prevents stalling near bifurcation)');
+  w('** Max arc increment     : 0.25   (limits overshoot on softening branch)');
+  w('** LPF=1.0 = P_total ('+p.Ptot+' kN); step continues past 1.0 to trace collapse');
+  w('*Step, name=Load-to-Failure, nlgeom=YES');
+  w('*Static, Riks');
+  w(p.initLF+', 1.0, 1e-7, 0.25, '+PtotN.toFixed(1)+', , ,');
+  w('*Controls, parameters=time incrementation');
+  w(String(p.maxI)+', , , , , , , , , , , , , , , ');
+
+  wSec('APPLIED LOADS');
+  w('** P_total = '+p.Ptot+' kN distributed as '+loadPerNode.toFixed(4)+' N/node over '+totalLoadNodes+' nodes');
+  w('** Positive LPF → load in –y direction (downward)');
+  w('*Cload');
+  loadXs.forEach(function(lx){ w('N-LOAD-'+Math.round(lx)+', 2, -'+loadPerNode.toFixed(4)); });
+
+  wSec('MONITOR');
+  w('*Monitor, node=IBEAM-1.'+monitorNode+', dof=2, frequency=1');
+
+  wSec('FIELD OUTPUT  (every 5 increments)');
+  w('*Output, field, frequency=5');
+  w('*Node Output');
+  w('U, RF');
+  w('*Element Output, directions=YES');
+  w('S, MISES, PEEQ, LE');
+
+  wSec('HISTORY OUTPUT  (every increment)');
+  w('** Load-deflection at midspan');
+  w('*Output, history, frequency=1');
+  w('*Node Output, nset=N-MIDSPAN-BOT');  w('U2, RF2');
+  w('*Output, history, frequency=1');
+  w('*Node Output, nset=N-MIDSPAN-NEUT'); w('U1, U2, U3');
+  w('** Reactions at supports');
+  w('*Output, history, frequency=1');
+  w('*Node Output, nset=N-LEFT-SUPPORT'); w('RF1, RF2, RF3');
+  w('** Plasticity at critical elements');
+  w('*Output, history, frequency=1');
+  w('*Element Output, elset=IBEAM-1.E-BF-MIDSPAN'); w('MISES, PEEQ, S11');
+  w('*Output, history, frequency=1');
+  w('*Element Output, elset=IBEAM-1.E-TF-MIDSPAN'); w('MISES, PEEQ, S11');
+  w('*Output, history, frequency=1');
+  w('*Element Output, elset=IBEAM-1.E-WEB-LOADPT'); w('MISES, PEEQ, S11, S12');
+
+  w('*End Step');
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  POST-PROCESSING NOTES                                                  ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
+  w('** ================================================================');
+  w('** POST-PROCESSING GUIDE');
+  w('** ================================================================');
+  w('** LOAD SCALE:');
+  w('**   Actual load = LPF × '+PtotN.toFixed(0)+' N = LPF × '+p.Ptot+' kN');
+  w('**   LPF=1.0 => full target load ('+p.Ptot+' kN)');
+  w('**');
+  w('** FIRST YIELD:');
+  w('**   Result > History > PEEQ at E-BF-MIDSPAN');
+  w('**   First increment where PEEQ > 1×10⁻⁶ → P_yield = LPF × '+p.Ptot+' kN');
+  w('**');
+  w('** FAILURE (peak load):');
+  w('**   Result > History > U2 at N-MIDSPAN-BOT');
+  w('**   Peak of load-deflection curve → P_failure = LPF_peak × '+p.Ptot+' kN');
+  w('**');
+  w('** Python ODB extraction (File > Run Script in Abaqus/CAE):');
+  w('**   from odbAccess import openOdb');
+  w('**   odb  = openOdb("'+fileNum+'_'+prof.label+'.odb")');
+  w('**   step = odb.steps["Load-to-Failure"]');
+  w('**   P_kN = '+p.Ptot);
+  w('**   for frame in step.frames:');
+  w('**       peeq = frame.fieldOutputs["PEEQ"]');
+  w('**       if any(v.data > 1e-6 for v in peeq.values):');
+  w('**           print("First yield: LPF =", frame.frameValue, "=> P =", round(frame.frameValue*P_kN,2), "kN")');
+  w('**           break');
+  w('**   peak = max(step.frames, key=lambda f: f.frameValue)');
+  w('**   print("Failure:     LPF =", peak.frameValue,   "=> P =", round(peak.frameValue*P_kN,2), "kN")');
+  w('**');
+  w('** RESULTS TABLE (fill after analysis):');
+  w('**   Profile  : '+prof.label);
+  w('**   Section  : '+sectKey+(isOv?' [OVERRIDDEN]':''));
+  w('**   Test     : '+testType);
+  w('**   P_target : '+p.Ptot+' kN  (LPF=1.0)');
+  w('**   ─────────────────────────────────────────────');
+  w('**   Event        │ LPF  │ P (kN)  │ Location');
+  w('**   First yield  │ ___  │ ___     │ ___');
+  w('**   Peak load    │ ___  │ ___     │ ___');
+  w('**   ─────────────────────────────────────────────');
+  if (isZone) {
+    w('**   Zone: x=['+prof.x1+','+prof.x2+'] mm  loss_in='+prof.inL+' mm  loss_out='+prof.outL+' mm');
+  } else {
+    w('**   Corrosion: TF='+(p.tf-etf).toFixed(3)+' mm  WEB='+(p.tw-etw).toFixed(3)+' mm  BF='+(p.tf-ebf).toFixed(3)+' mm');
+  }
+  w('** END: '+fileNum+'_'+prof.label+'.inp');
+  w('** ================================================================');
+
+  return out.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SYNTAX HIGHLIGHTER
+// ═══════════════════════════════════════════════════════════════════════════════
+function hlCode(code) {
+  return code.split('\n').map(function(raw,i) {
+    var e=raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var h;
+    if (/^\*\*/.test(raw)) {
+      h='<span class="hc">'+e+'</span>';
+    } else if (/^\*[A-Za-z]/.test(raw)) {
+      var pts=e.split(',');
+      var kw='<span class="hk">'+pts[0]+'</span>';
+      var rest=pts.slice(1).map(function(pt){
+        return pt.replace(/^(\s*)([A-Za-z_]+)(=)(.+)/,function(_,sp,k,eq,v){
+          return sp+'<span class="hp">'+k+'</span>'+eq+'<span class="hv">'+v+'</span>';
+        });
+      });
+      h=[kw].concat(rest).join(',');
+    } else {
+      h=e.replace(/\b(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\b/g,'<span class="hn">$1</span>');
+    }
+    return '<div class="cl"><span class="ln">'+(i+1)+'</span><span class="lc">'+h+'</span></div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GENERATE / DOWNLOAD
+// ═══════════════════════════════════════════════════════════════════════════════
+function genAll() {
+  if (!profiles.length) { toast('Add at least one corrosion profile'); return; }
+  var p=getP(); generated={}; var errors=[];
+  profiles.forEach(function(prof,i){
+    var name=String(i+1).padStart(2,'0')+'_'+prof.label+'.inp';
+    try { generated[name]=makeINP(prof,p,i); }
+    catch(e) { errors.push(prof.label+': '+e.message); }
+  });
+  if (errors.length) { toast('Errors: '+errors.join('; ')); return; }
+  var bar=document.getElementById('tabbar');
+  var keys=Object.keys(generated);
+  bar.innerHTML=keys.map(function(f,i){
+    return '<button class="otab'+(i===0?' act':'')+'" onclick="showFile(\''+f+'\',this)">'
+      +(i===0?'<div class="tdot"></div>':'')+f+'</button>';
+  }).join('');
+  activeFile=keys[0]; renderFile(activeFile);
+  toast('Generated '+profiles.length+' .inp file'+(profiles.length>1?'s':''));
+}
+
+function showFile(name,btn) {
+  document.querySelectorAll('.otab').forEach(function(t){ t.classList.remove('act'); var d=t.querySelector('.tdot'); if(d)d.remove(); });
+  btn.classList.add('act'); btn.insertAdjacentHTML('afterbegin','<div class="tdot"></div>');
+  activeFile=name; renderFile(name);
+}
+function renderFile(name) { document.getElementById('ca').innerHTML='<pre>'+hlCode(generated[name])+'</pre>'; }
+
+function dlCur() { if(!activeFile){toast('Generate files first');return;} dl(activeFile,generated[activeFile]); }
+function dlAll() {
+  var keys=Object.keys(generated);
+  if(!keys.length){toast('Generate files first');return;}
+  keys.forEach(function(k,i){setTimeout(function(){dl(k,generated[k]);},i*120);});
+  toast('Downloading '+keys.length+' files');
+}
+function dl(name,content) {
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:'text/plain'}));
+  a.download=name; a.click();
+}
+function toast(msg) {
+  var el=document.getElementById('notif');
+  el.textContent=msg; el.classList.add('show');
+  setTimeout(function(){el.classList.remove('show');},2800);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  loadStd();
+  setBend('3pt');
+  onP();
+  document.querySelectorAll('input, select').forEach(function(el){
+    el.addEventListener('input',  onP);
+    el.addEventListener('change', onP);
+  });
+});
+</script>
+</body>
+</html>
