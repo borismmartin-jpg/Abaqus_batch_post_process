@@ -906,7 +906,7 @@ function drawMap(prof) {
     var xf=xi/NS, px=bx+xf*bLen;
     var cTF=lossColour(getLoss(prof,xf,'tf')), cWEB=lossColour(getLoss(prof,xf,'web')), cBF=lossColour(getLoss(prof,xf,'bf'));
     if (cTF)  { var h=Math.min(tfH, (getLoss(prof,xf,'tf')/p.tf)*tfH);   ctx.fillStyle=cTF;  ctx.fillRect(px,tfY+tfH-h,sw,h); }
-    if (cWEB) { ctx.fillStyle=cWEB; ctx.fillRect(px,webY,sw,webH); }
+    if (cWEB && !(prof && prof.type==='zerogeom')) { ctx.fillStyle=cWEB; ctx.fillRect(px,webY,sw,webH); }
     if (cBF)  { var h2=Math.min(bfH,(getLoss(prof,xf,'bf')/p.tf)*bfH);  ctx.fillStyle=cBF;  ctx.fillRect(px,bfY,sw,h2); }
   }
 
@@ -1309,15 +1309,37 @@ function makeINP(prof, p, idx) {
   // ── Emit elements ──────────────────────────────────────────────────────────
   var elemLines=[], eid=1;
   var webES=1;
+  function webIsHoleAt(xc, yc) {
+    if (prof.type!=='zerogeom') return false;
+    var wHalf=prof.w/2, hHalf=prof.h/2;
+    if (Math.abs(xc-prof.xc) > wHalf) return false;
+    if (prof.vmode==='fullweb') return true;
+    if (prof.vmode==='top') return yc >= Math.max(0, p.d-prof.h);
+    if (prof.vmode==='bottom') return yc <= Math.min(p.d, prof.h);
+    if (prof.shape==='circle') {
+      var dx=(xc-prof.xc)/Math.max(1e-6,wHalf), dy=(yc-prof.yc)/Math.max(1e-6,hHalf);
+      return (dx*dx + dy*dy) <= 1.0;
+    }
+    return Math.abs(yc-prof.yc) <= hHalf;
+  }
+  var webHoleIds=[], webKeptIds=[];
   for (var xi=0;xi<nx;xi++) for (var yi=0;yi<nyW;yi++)
-    elemLines.push(eid+++', '+webNid(xi,yi)+', '+webNid(xi+1,yi)+', '+webNid(xi+1,yi+1)+', '+webNid(xi,yi+1));
+  {
+    var weid=eid++;
+    var xc=(xs[xi]+xs[xi+1])/2, yc=(ysW[yi]+ysW[yi+1])/2;
+    if (webIsHoleAt(xc,yc)) webHoleIds.push(weid);
+    else {
+      webKeptIds.push(weid);
+      elemLines.push(weid+', '+webNid(xi,yi)+', '+webNid(xi+1,yi)+', '+webNid(xi+1,yi+1)+', '+webNid(xi,yi+1));
+    }
+  }
   var webEE=eid-1, tfES=eid;
   for (var xi=0;xi<nx;xi++) for (var zi=0;zi<nzF;zi++)
     elemLines.push(eid+++', '+tfNid(xi,zi)+', '+tfNid(xi+1,zi)+', '+tfNid(xi+1,zi+1)+', '+tfNid(xi,zi+1));
   var tfEE=eid-1, bfES=eid;
   for (var xi=0;xi<nx;xi++) for (var zi=0;zi<nzF;zi++)
     elemLines.push(eid+++', '+bfNid(xi,zi)+', '+bfNid(xi+1,zi)+', '+bfNid(xi+1,zi+1)+', '+bfNid(xi,zi+1));
-  var bfEE=eid-1, totalElems=bfEE;
+  var bfEE=eid-1, totalElems=elemLines.length;
 
   // ── Key node sets ──────────────────────────────────────────────────────────
   var midXi = Math.max(0, Math.min(nx, Math.round((p.L/2)/(p.L/nx))));
@@ -1364,7 +1386,10 @@ function makeINP(prof, p, idx) {
   var lxi=Math.max(0,Math.round(loadXs[0]/(p.L/nx))-1);
   var eBFids=[], eTFids=[], eWEBids=[];
   for (var k=0;k<nzF;k++) { eBFids.push(bfES+mxi*nzF+k); eTFids.push(tfES+mxi*nzF+k); }
-  for (var k=0;k<nyW;k++) eWEBids.push(webES+lxi*nyW+k);
+  for (var k=0;k<nyW;k++) {
+    var wid=webES+lxi*nyW+k;
+    if (webHoleIds.indexOf(wid)===-1) eWEBids.push(wid);
+  }
 
   // ── Shell thicknesses ──────────────────────────────────────────────────────
   //
@@ -1401,7 +1426,7 @@ function makeINP(prof, p, idx) {
   } else if (prof.type==='zerogeom') {
     etf=p.tf;
     ebf=p.tf;
-    etw=0.5;
+    etw=p.tw;
   } else { // custom
     etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
   }
@@ -1463,7 +1488,7 @@ function makeINP(prof, p, idx) {
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
   } else if (prof.type==='zerogeom') {
     w('** Zero-thickness geometry: '+prof.shape+'  xc='+prof.xc+' mm  yc='+prof.yc+' mm  w='+prof.w+' mm  h='+prof.h+' mm  vmode='+prof.vmode);
-    w('** Web elements inside geometry are assigned residual t=0.5 mm');
+    w('** Web elements inside geometry are removed from the part (true opening)');
     w('** Local mesh refinement is applied around geometry in x and y');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
@@ -1501,7 +1526,8 @@ function makeINP(prof, p, idx) {
 
   wSec('ELEMENT SETS');
   w('** Full-face sets (reference / output only — sections use per-column sets below)');
-  w('*Elset, elset=WEB-ALL, generate'); w(webES+', '+webEE+', 1');
+  if (prof.type==='zerogeom') { w('*Elset, elset=WEB-ALL'); wChunk(webKeptIds,16); }
+  else { w('*Elset, elset=WEB-ALL, generate'); w(webES+', '+webEE+', 1'); }
   w('*Elset, elset=TF-ALL,  generate'); w(tfES +', '+tfEE +', 1');
   w('*Elset, elset=BF-ALL,  generate'); w(bfES +', '+bfEE +', 1');
   w('** Output element sets');
@@ -1525,27 +1551,7 @@ function makeINP(prof, p, idx) {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
   if (prof.type==='zerogeom') {
-    var webZeroIds=[], webIntactIds=[];
-    function webIsZeroAt(xc, yc) {
-      var wHalf=prof.w/2, hHalf=prof.h/2;
-      var xInside=Math.abs(xc-prof.xc) <= wHalf;
-      if (!xInside) return false;
-      if (prof.vmode==='fullweb') return true;
-      if (prof.vmode==='top') return yc >= Math.max(0, p.d-prof.h);
-      if (prof.vmode==='bottom') return yc <= Math.min(p.d, prof.h);
-      if (prof.shape==='circle') {
-        var dx=(xc-prof.xc)/Math.max(1e-6,wHalf), dy=(yc-prof.yc)/Math.max(1e-6,hHalf);
-        return (dx*dx + dy*dy) <= 1.0;
-      }
-      return Math.abs(yc-prof.yc) <= hHalf;
-    }
     for (var xi=0;xi<nx;xi++) {
-      var xc=(xs[xi]+xs[xi+1])/2;
-      for (var yi=0;yi<nyW;yi++) {
-        var yc=(ysW[yi]+ysW[yi+1])/2;
-        var eId=webES + xi*nyW + yi;
-        if (webIsZeroAt(xc,yc)) webZeroIds.push(eId); else webIntactIds.push(eId);
-      }
       var colLabel='COL-'+String(xi+1).padStart(3,'0');
       var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
       var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
@@ -1554,13 +1560,12 @@ function makeINP(prof, p, idx) {
       w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
       w('*Shell Section, elset=BF-'+colLabel+', material=STEEL'); w(p.tf.toFixed(4)+', 5');
     }
-    if (webIntactIds.length) {
-      w('*Elset, elset=WEB-INTACT'); wChunk(webIntactIds,16);
+    if (webKeptIds.length) {
+      w('*Elset, elset=WEB-INTACT'); wChunk(webKeptIds,16);
       w('*Shell Section, elset=WEB-INTACT, material=STEEL'); w(p.tw.toFixed(4)+', 5');
     }
-    if (webZeroIds.length) {
-      w('*Elset, elset=WEB-ZERO'); wChunk(webZeroIds,16);
-      w('*Shell Section, elset=WEB-ZERO, material=STEEL'); w('0.5000, 5');
+    if (webHoleIds.length) {
+      w('** WEB-HOLE elements are removed from the part (no section assigned): count='+webHoleIds.length);
     }
   } else {
     for (var xi=0;xi<nx;xi++) {
