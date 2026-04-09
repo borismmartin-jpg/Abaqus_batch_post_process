@@ -910,6 +910,39 @@ function drawMap(prof) {
     if (cBF)  { var h2=Math.min(bfH,(getLoss(prof,xf,'bf')/p.tf)*bfH);  ctx.fillStyle=cBF;  ctx.fillRect(px,bfY,sw,h2); }
   }
 
+  // Zero-geometry overlay (more accurate 2D web footprint)
+  if (prof && prof.type==='zerogeom') {
+    var gx1 = bx + (Math.max(0,prof.xc-prof.w/2)/p.L)*bLen;
+    var gx2 = bx + (Math.min(p.L,prof.xc+prof.w/2)/p.L)*bLen;
+    var yMin, yMax;
+    if (prof.vmode==='fullweb') { yMin=0; yMax=p.d; }
+    else if (prof.vmode==='top') { yMin=Math.max(0,p.d-prof.h); yMax=p.d; }
+    else if (prof.vmode==='bottom') { yMin=0; yMax=Math.min(p.d,prof.h); }
+    else { yMin=Math.max(0,prof.yc-prof.h/2); yMax=Math.min(p.d,prof.yc+prof.h/2); }
+    var gy1 = webY + (yMin/p.d)*webH;
+    var gy2 = webY + (yMax/p.d)*webH;
+    ctx.save();
+    ctx.fillStyle='rgba(255,50,80,0.55)';
+    ctx.strokeStyle='rgba(255,120,150,0.9)';
+    ctx.lineWidth=1;
+    if (prof.shape==='circle') {
+      var cx=(gx1+gx2)/2, cy=(gy1+gy2)/2, rx=Math.max(2,(gx2-gx1)/2), ry=Math.max(2,(gy2-gy1)/2);
+      ctx.beginPath();
+      ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
+      ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillRect(gx1, gy1, Math.max(1,gx2-gx1), Math.max(1,gy2-gy1));
+      ctx.strokeRect(gx1, gy1, Math.max(1,gx2-gx1), Math.max(1,gy2-gy1));
+    }
+    // refined mesh guide around geometry
+    ctx.setLineDash([2,2]);
+    ctx.strokeStyle='rgba(255,180,0,0.85)';
+    [gx1,gx2].forEach(function(xg){ ctx.beginPath(); ctx.moveTo(xg,webY); ctx.lineTo(xg,webY+webH); ctx.stroke(); });
+    [gy1,gy2].forEach(function(yg){ ctx.beginPath(); ctx.moveTo(bx,yg); ctx.lineTo(ex,yg); ctx.stroke(); });
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   // Section outlines
   ctx.strokeStyle='#2a4a6a'; ctx.lineWidth=0.7;
   ctx.strokeRect(bx,tfY,bLen,tfH); ctx.strokeRect(bx,webY,bLen,webH); ctx.strokeRect(bx,bfY,bLen,bfH);
@@ -969,6 +1002,7 @@ function drawMap(prof) {
     '<div class="legit"><div class="legsw" style="background:#0e2035;border-color:#2a4a6a"></div>No loss</div>' +
     '<div class="legit"><div class="legsw" style="background:rgba(150,40,130,0.9)"></div>Moderate</div>' +
     '<div class="legit"><div class="legsw" style="background:rgba(255,0,0,0.9)"></div>Max ' + maxL.toFixed(2) + ' mm</div>' +
+    (prof&&prof.type==='zerogeom' ? '<div class="legit" style="color:#ff8aa1">■ Zero-thickness geometry</div>' : '') +
     '<div class="legit" style="color:var(--ora)">▼ Load point</div>';
 }
 
@@ -1177,19 +1211,53 @@ function profileThicknesses(prof, p, nx, xs) {
 
 function makeINP(prof, p, idx) {
 
-  // ── Mesh counts ────────────────────────────────────────────────────────────
-  var nx   = Math.max(4, Math.ceil(p.L / p.mesh));  // longitudinal divisions
-  var nyW  = Math.max(2, Math.ceil(p.d / p.mesh));  // web height divisions
+  // ── Coordinate arrays (supports local refinement for zero-geometry) ───────
+  function r4(v){ return parseFloat(v.toFixed(4)); }
+  function uniqSorted(arr){
+    return arr.sort(function(a,b){return a-b;}).filter(function(v,i,a){ return i===0 || Math.abs(v-a[i-1])>1e-6; });
+  }
+  function buildAxisRefined(L, coarse, fineStart, fineEnd, fineSize, pad){
+    var out=[0], x=0;
+    coarse=Math.max(2,coarse); fineSize=Math.max(1,fineSize); pad=Math.max(0,pad||0);
+    while (x < L-1e-9) {
+      var inFine = (x >= (fineStart-pad) && x < (fineEnd+pad));
+      var dx = inFine ? Math.min(coarse, fineSize) : coarse;
+      var nxv = Math.min(L, x+dx);
+      if (L-nxv < dx*0.35) nxv=L;
+      out.push(r4(nxv));
+      x=nxv;
+    }
+    out[0]=0; out[out.length-1]=r4(L);
+    return uniqSorted(out);
+  }
+  function yRangeForZeroGeom(pr){
+    if (pr.vmode==='fullweb') return [0, p.d];
+    if (pr.vmode==='top') return [Math.max(0,p.d-pr.h), p.d];
+    if (pr.vmode==='bottom') return [0, Math.min(p.d,pr.h)];
+    return [Math.max(0,pr.yc-pr.h/2), Math.min(p.d,pr.yc+pr.h/2)];
+  }
+
+  var xs=[], ysW=[], zsF=[];
+  if (prof.type==='zerogeom') {
+    var yr = yRangeForZeroGeom(prof);
+    var fineX = Math.max(1.5, Math.min(p.mesh/3, prof.w/6));
+    var fineY = Math.max(1.5, Math.min(p.mesh/3, Math.max(8, prof.h/6)));
+    xs  = buildAxisRefined(p.L, p.mesh, Math.max(0,prof.xc-prof.w/2), Math.min(p.L,prof.xc+prof.w/2), fineX, p.mesh);
+    ysW = buildAxisRefined(p.d, p.mesh, yr[0], yr[1], fineY, p.mesh*0.5);
+  } else {
+    var nx0=Math.max(4,Math.ceil(p.L/p.mesh)), ny0=Math.max(2,Math.ceil(p.d/p.mesh));
+    for (var i=0;i<=nx0;i++) xs.push(r4(i*p.L/nx0));
+    for (var j=0;j<=ny0;j++) ysW.push(r4(j*p.d/ny0));
+  }
   var nzF  = Math.max(4, Math.ceil(p.b / p.mesh));  // flange width divisions
+  for (var k=0;k<=nzF;k++) zsF.push(r4(k*p.b/nzF));
+
+  var nx   = xs.length-1;                            // longitudinal divisions
+  var nyW  = ysW.length-1;                           // web height divisions
   var midZi = Math.floor(nzF / 2);                  // z-index of web centreline
   var nzL  = midZi;                                 // left flange half-columns
   var nzR  = nzF - midZi;                           // right flange half-columns
 
-  // ── Coordinate arrays ──────────────────────────────────────────────────────
-  var xs=[], ysW=[], zsF=[];
-  for (var i=0;i<=nx; i++) xs.push(  parseFloat((i*p.L/nx).toFixed(4)));
-  for (var i=0;i<=nyW;i++) ysW.push( parseFloat((i*p.d/nyW).toFixed(4)));
-  for (var i=0;i<=nzF;i++) zsF.push( parseFloat((i*p.b/nzF).toFixed(4)));
   var yTF  = parseFloat(p.d.toFixed(4));
   var zMid = parseFloat((p.b/2).toFixed(4));
 
@@ -1396,6 +1464,7 @@ function makeINP(prof, p, idx) {
   } else if (prof.type==='zerogeom') {
     w('** Zero-thickness geometry: '+prof.shape+'  xc='+prof.xc+' mm  yc='+prof.yc+' mm  w='+prof.w+' mm  h='+prof.h+' mm  vmode='+prof.vmode);
     w('** Web elements inside geometry are assigned residual t=0.5 mm');
+    w('** Local mesh refinement is applied around geometry in x and y');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
     w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
