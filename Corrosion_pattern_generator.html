@@ -1246,6 +1246,25 @@ function makeINP(prof, p, idx) {
     for (var n=1;n<nMin;n++) out.push(r4(a + (b-a)*n/nMin));
     return uniqSorted(out);
   }
+  function axisWithRefinedCore(L, coarse, a, b, nSeg, center){
+    a=Math.max(0,Math.min(L,a)); b=Math.max(0,Math.min(L,b));
+    if (b<a) { var t=a; a=b; b=t; }
+    nSeg=Math.max(1,Math.round(nSeg));
+    var pts=[0];
+    // left coarse
+    var x=0;
+    while (x+coarse < a-1e-9) { x += coarse; pts.push(r4(x)); }
+    pts.push(r4(a));
+    // refined core (exact number of segments through geometry width/height)
+    for (var i=1;i<nSeg;i++) pts.push(r4(a + (b-a)*i/nSeg));
+    pts.push(r4(b));
+    // right coarse
+    x=b;
+    while (x+coarse < L-1e-9) { x += coarse; pts.push(r4(x)); }
+    pts.push(r4(L));
+    if (center!==undefined && center!==null) pts.push(r4(center));
+    return uniqSorted(pts);
+  }
   function yRangeForZeroGeom(pr){
     if (pr.vmode==='fullweb') return [0, p.d];
     if (pr.vmode==='top') return [Math.max(0,p.d-pr.h), p.d];
@@ -1258,12 +1277,15 @@ function makeINP(prof, p, idx) {
     var yr = yRangeForZeroGeom(prof);
     var xA=Math.max(0,prof.xc-prof.w/2), xB=Math.min(p.L,prof.xc+prof.w/2);
     var yA=yr[0], yB=yr[1];
-    var fineX = Math.max(0.75, Math.min(p.mesh*0.5, Math.max(1.0, prof.w/8)));
-    var fineY = Math.max(0.75, Math.min(p.mesh*0.5, Math.max(1.0, Math.max(8,prof.h)/8)));
-    xs  = buildAxisRefined(p.L, p.mesh, xA, xB, fineX, p.mesh, [prof.xc]);
-    ysW = buildAxisRefined(p.d, p.mesh, yA, yB, fineY, p.mesh*0.5, [prof.yc]);
-    xs  = enforceMinSegments(xs, xA, xB, 6);
-    ysW = enforceMinSegments(ysW, yA, yB, 4);
+    // size-driven core refinement: enforce enough segments through defect geometry
+    var target = Math.max(0.75, p.mesh*0.35);
+    var nSegX = Math.max(8, Math.ceil((xB-xA)/target));
+    var nSegY = Math.max(prof.shape==='circle' ? 8 : 6, Math.ceil((yB-yA)/target));
+    xs  = axisWithRefinedCore(p.L, p.mesh, xA, xB, nSegX, prof.xc);
+    ysW = axisWithRefinedCore(p.d, p.mesh, yA, yB, nSegY, prof.yc);
+    // guardrails for very small geometries
+    xs  = enforceMinSegments(xs, xA, xB, Math.max(6, Math.min(16,nSegX)));
+    ysW = enforceMinSegments(ysW, yA, yB, Math.max(4, Math.min(14,nSegY)));
   } else {
     var nx0=Math.max(4,Math.ceil(p.L/p.mesh)), ny0=Math.max(2,Math.ceil(p.d/p.mesh));
     for (var i=0;i<=nx0;i++) xs.push(r4(i*p.L/nx0));
