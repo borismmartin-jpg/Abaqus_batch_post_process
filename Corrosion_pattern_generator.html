@@ -1745,6 +1745,7 @@ function makeINP(prof, p, idx) {
   });
   w('*Nset, nset=N-MIDSPAN-BOT,  instance=IBEAM-1');   wChunk(nMidBot,16);
   w('*Nset, nset=N-MIDSPAN-NEUT, instance=IBEAM-1');   wChunk(nMidNeut,16);
+  w('*Nset, nset=N-MONITOR,      instance=IBEAM-1');   wChunk([monitorNode],16);
 
   w('*End Assembly');
 
@@ -1807,7 +1808,7 @@ function makeINP(prof, p, idx) {
   w('*Output, history, frequency=1');
   w('*Node Output, nset=N-MIDSPAN-BOT');  w('U2, RF2');
   w('*Output, history, frequency=1');
-  w('*Node Output, nset=N-MIDSPAN-NEUT'); w('U1, U2, U3');
+  w('*Node Output, nset=N-MONITOR');      w('U1, U2, U3');
   w('** Reactions at supports');
   w('*Output, history, frequency=1');
   w('*Node Output, nset=N-LEFT-SUPPORT'); w('RF1, RF2, RF3');
