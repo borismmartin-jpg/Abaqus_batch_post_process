@@ -545,6 +545,23 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
         <div class="fld"><label>Y center (mm from BF)</label><input type="number" id="zgy" value="100" step="10" min="0"></div>
         <div class="fld"><label>Label prefix</label><input type="text" id="zgnm" value="WEB_DEF"></div>
       </div>
+      <div class="row r2">
+        <div class="fld"><label>Refine area mode</label>
+          <select id="zgRefMode">
+            <option value="auto">Auto (around defect)</option>
+            <option value="custom">Custom area</option>
+          </select>
+        </div>
+        <div class="fld"><label>Fine size (mm)</label><input type="number" id="zgFine" value="6" step="0.5" min="0.5"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Transition X (mm)</label><input type="number" id="zgTX" value="120" step="10" min="0"></div>
+        <div class="fld"><label>Transition Y (mm)</label><input type="number" id="zgTY" value="80" step="10" min="0"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Refine x1/x2 (mm)</label><input type="text" id="zgrx" value="600,1400"></div>
+        <div class="fld"><label>Refine y1/y2 (mm)</label><input type="text" id="zgry" value="40,160"></div>
+      </div>
       <button class="btn bout bfull" onclick="addZeroGeomSweep()">+ Add Zero-Thickness Sweep</button>
     </div>
 
@@ -1129,6 +1146,7 @@ function addZeroGeomSweep() {
   var p=getP();
   var shape=gs('zgshape');
   var vmode=gs('zgvmode');
+  var refMode=gs('zgRefMode');
   var x1=Math.max(0, Math.min(p.L, gv('zgx1')));
   var x2=Math.max(0, Math.min(p.L, gv('zgx2')));
   if (x2<x1) { var tx=x1; x1=x2; x2=tx; }
@@ -1136,12 +1154,23 @@ function addZeroGeomSweep() {
   var w=Math.max(1, gv('zgw'));
   var h=Math.max(1, gv('zgh'));
   var yc=Math.max(0, Math.min(p.d, gv('zgy')));
+  var fineSize=Math.max(0.5, gv('zgFine'));
+  var transX=Math.max(0, gv('zgTX'));
+  var transY=Math.max(0, gv('zgTY'));
+  function parsePair(s, da, db){
+    var m=String(s||'').split(',').map(function(v){return parseFloat(v.trim());}).filter(function(v){return !isNaN(v);});
+    var a=(m.length?m[0]:da), b=(m.length>1?m[1]:db);
+    if (b<a){ var t=a;a=b;b=t; }
+    return [a,b];
+  }
+  var rx=parsePair(gs('zgrx'), x1, x2), ry=parsePair(gs('zgry'), Math.max(0,yc-h/2), Math.min(p.d,yc+h/2));
   var prefix=(gs('zgnm').trim()||'WEB_DEF').replace(/\s+/g,'_');
   for (var i=0;i<n;i++) {
     var xc = n===1 ? (x1+x2)/2 : (x1 + (x2-x1)*i/(n-1));
     var label = prefix+'_'+shape.toUpperCase()+'_X'+Math.round(xc);
     profiles.push({
       type:'zerogeom',shape:shape,vmode:vmode,xc:parseFloat(xc.toFixed(3)),yc:yc,w:w,h:h,
+      refMode:refMode,fineSize:fineSize,transX:transX,transY:transY,rx1:rx[0],rx2:rx[1],ry1:ry[0],ry2:ry[1],
       x1:parseFloat((xc-w/2).toFixed(3)),x2:parseFloat((xc+w/2).toFixed(3)),
       label:label,
       desc:'Zero-thickness '+shape+' on web @x='+xc.toFixed(1)+' mm  w='+w+' mm h='+h+' mm vmode='+vmode
@@ -1275,6 +1304,27 @@ function makeINP(prof, p, idx) {
     if (center!==undefined && center!==null) pts.push(r4(center));
     return uniqSorted(pts);
   }
+  function axisWithTransition(L, coarse, fine, a, b, trans, anchors){
+    a=Math.max(0,Math.min(L,a)); b=Math.max(0,Math.min(L,b));
+    if (b<a) { var t=a; a=b; b=t; }
+    trans=Math.max(0,trans||0);
+    fine=Math.max(0.5,Math.min(coarse,fine));
+    var out=[0], x=0;
+    while (x < L-1e-9) {
+      var dx=coarse;
+      if (x>=a && x<b) dx=fine;
+      else if (trans>0 && x>=a-trans && x<a) {
+        var s=(a-x)/trans; dx=fine + (coarse-fine)*Math.min(1,Math.max(0,s));
+      } else if (trans>0 && x>=b && x<b+trans) {
+        var s2=(x-b)/trans; dx=fine + (coarse-fine)*Math.min(1,Math.max(0,s2));
+      }
+      var nxv=Math.min(L, x+dx);
+      if (L-nxv < dx*0.35) nxv=L;
+      out.push(r4(nxv)); x=nxv;
+    }
+    out = out.concat([a,b]).concat(anchors||[]);
+    return uniqSorted(out.map(r4));
+  }
   function yRangeForZeroGeom(pr){
     if (pr.vmode==='fullweb') return [0, p.d];
     if (pr.vmode==='top') return [Math.max(0,p.d-pr.h), p.d];
@@ -1285,17 +1335,24 @@ function makeINP(prof, p, idx) {
   var xs=[], ysW=[], zsF=[];
   if (prof.type==='zerogeom') {
     var yr = yRangeForZeroGeom(prof);
-    var xA=Math.max(0,prof.xc-prof.w/2), xB=Math.min(p.L,prof.xc+prof.w/2);
-    var yA=yr[0], yB=yr[1];
-    // size-driven core refinement: enforce enough segments through defect geometry
-    var target = Math.max(0.75, p.mesh*0.35);
-    var nSegX = Math.max(8, Math.ceil((xB-xA)/target));
-    var nSegY = Math.max(prof.shape==='circle' ? 8 : 6, Math.ceil((yB-yA)/target));
-    xs  = axisWithRefinedCore(p.L, p.mesh, xA, xB, nSegX, prof.xc);
-    ysW = axisWithRefinedCore(p.d, p.mesh, yA, yB, nSegY, prof.yc);
-    // guardrails for very small geometries
-    xs  = enforceMinSegments(xs, xA, xB, Math.max(6, Math.min(16,nSegX)));
-    ysW = enforceMinSegments(ysW, yA, yB, Math.max(4, Math.min(14,nSegY)));
+    var xDefA=Math.max(0,prof.xc-prof.w/2), xDefB=Math.min(p.L,prof.xc+prof.w/2);
+    var yDefA=yr[0], yDefB=yr[1];
+    var xA = (prof.refMode==='custom') ? Math.max(0,Math.min(p.L,prof.rx1)) : xDefA;
+    var xB = (prof.refMode==='custom') ? Math.max(0,Math.min(p.L,prof.rx2)) : xDefB;
+    var yA = (prof.refMode==='custom') ? Math.max(0,Math.min(p.d,prof.ry1)) : yDefA;
+    var yB = (prof.refMode==='custom') ? Math.max(0,Math.min(p.d,prof.ry2)) : yDefB;
+    if (xB<xA) { var tx=xA; xA=xB; xB=tx; }
+    if (yB<yA) { var ty=yA; yA=yB; yB=ty; }
+    var fine = Math.max(0.5, Math.min(p.mesh, prof.fineSize || Math.max(0.75,p.mesh*0.35)));
+    var tX = Math.max(0, prof.transX || p.mesh*2);
+    var tY = Math.max(0, prof.transY || p.mesh*1.5);
+    xs  = axisWithTransition(p.L, p.mesh, fine, xA, xB, tX, [xA,xB,prof.xc,xDefA,xDefB]);
+    ysW = axisWithTransition(p.d, p.mesh, fine, yA, yB, tY, [yA,yB,prof.yc,yDefA,yDefB]);
+    // ensure defect itself remains well captured even with large custom areas
+    var nSegX = Math.max(8, Math.ceil((xDefB-xDefA)/Math.max(0.5,fine)));
+    var nSegY = Math.max(prof.shape==='circle' ? 8 : 6, Math.ceil((yDefB-yDefA)/Math.max(0.5,fine)));
+    xs  = enforceMinSegments(xs, xDefA, xDefB, Math.max(6, Math.min(20,nSegX)));
+    ysW = enforceMinSegments(ysW, yDefA, yDefB, Math.max(4, Math.min(18,nSegY)));
   } else {
     var nx0=Math.max(4,Math.ceil(p.L/p.mesh)), ny0=Math.max(2,Math.ceil(p.d/p.mesh));
     for (var i=0;i<=nx0;i++) xs.push(r4(i*p.L/nx0));
@@ -1559,7 +1616,8 @@ function makeINP(prof, p, idx) {
   } else if (prof.type==='zerogeom') {
     w('** Zero-thickness geometry: '+prof.shape+'  xc='+prof.xc+' mm  yc='+prof.yc+' mm  w='+prof.w+' mm  h='+prof.h+' mm  vmode='+prof.vmode);
     w('** Web elements inside geometry are removed from the part (true opening)');
-    w('** Local mesh refinement is applied around geometry in x and y');
+    w('** Mesh refinement: mode='+prof.refMode+'  fine='+prof.fineSize+' mm  transX='+prof.transX+' mm  transY='+prof.transY+' mm');
+    if (prof.refMode==='custom') w('** Custom refine area: x=['+prof.rx1+','+prof.rx2+'] mm  y=['+prof.ry1+','+prof.ry2+'] mm');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
     w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
