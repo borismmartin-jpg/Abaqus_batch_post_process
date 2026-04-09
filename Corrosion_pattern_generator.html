@@ -1494,7 +1494,11 @@ function makeINP(prof, p, idx) {
   for (var zi=0;zi<=nzF;zi++) nMidBot.push(bfNid(midXi,zi));
 
   // Neutral axis midspan (output)
-  var nMidNeut=[webNid(midXi, Math.floor(nyW/2))];
+  // Guard against any degenerate mesh edge-case so the node set is always valid.
+  var neutYi = Math.max(0, Math.min(nyW, Math.floor(nyW/2)));
+  var neutNode = webNid(midXi, neutYi);
+  if (!isFinite(neutNode) || neutNode < 1) neutNode = webNid(midXi, 0);
+  var nMidNeut=[Math.round(neutNode)];
 
   // Monitor node: bottom flange centreline at midspan
   var monitorNode = bfNid(midXi, midZi); // = webNid(midXi,0) due to shared node
