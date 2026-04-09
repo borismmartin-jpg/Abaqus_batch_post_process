@@ -192,6 +192,10 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
       <div class="fld"><label>Span L (mm)</label><input type="number" id="iL" value="2000" step="50" oninput="onP()"></div>
       <div class="fld" id="awrap"><label>Load offset a (mm)</label><input type="number" id="iA" value="600" step="50" oninput="onP()"></div>
     </div>
+    <div class="row r2">
+      <div class="fld"><label>Left support x (mm)</label><input type="number" id="iSX1" value="0" step="25" oninput="onP()"></div>
+      <div class="fld"><label>Right support x (mm)</label><input type="number" id="iSX2" value="2000" step="25" oninput="onP()"></div>
+    </div>
     <div class="hint" id="bhint"></div>
   </div>
 
@@ -701,8 +705,14 @@ function updOv() {
 function getP() {
   var d = gv('iD') || 203, b = gv('iB') || 133;
   var tf = gv('iTF') || 7.8, tw = gv('iTW') || 5.7;
+  var L = gv('iL') || 2000;
+  var sx1 = gv('iSX1'); if (isNaN(sx1)) sx1 = 0;
+  var sx2 = gv('iSX2'); if (isNaN(sx2)) sx2 = L;
+  sx1 = Math.max(0, Math.min(L, sx1));
+  sx2 = Math.max(0, Math.min(L, sx2));
+  if (sx2 < sx1) { var ts=sx1; sx1=sx2; sx2=ts; }
   return {
-    L: gv('iL') || 2000, a: gv('iA') || 600,
+    L: L, a: gv('iA') || 600, sx1:sx1, sx2:sx2,
     d: d, b: b, tf: tf, tw: tw, hw: d - 2*tf,
     E: gv('iE') || 200000, nu: gv('iNu') || 0.3,
     fy: gv('iFy') || 275, fu: gv('iFu') || 430, eu: gv('iEu') || 20,
@@ -734,9 +744,9 @@ function updStats() {
 function updHint() {
   var p = getP(), h = document.getElementById('bhint');
   if (bendMode === '3pt') {
-    h.innerHTML = 'Load at <b>x=' + (p.L/2) + ' mm</b>. M_max = P·L/4.';
+    h.innerHTML = 'Load at <b>x=' + (p.L/2) + ' mm</b>. Supports at <b>x=' + p.sx1 + '</b> and <b>x=' + p.sx2 + '</b> mm.';
   } else {
-    h.innerHTML = 'Loads at <b>x=' + p.a + ' mm</b> and <b>x=' + (p.L-p.a) + ' mm</b>. Pure bending zone = ' + (p.L-2*p.a) + ' mm.';
+    h.innerHTML = 'Loads at <b>x=' + p.a + ' mm</b> and <b>x=' + (p.L-p.a) + ' mm</b>. Supports at <b>x=' + p.sx1 + '</b> and <b>x=' + p.sx2 + '</b> mm.';
   }
 }
 
@@ -1394,14 +1404,33 @@ function makeINP(prof, p, idx) {
   nSymIds.push(tfNid(midXi,midZi)); // = webNid(midXi,nyW), already added via web loop – OK (duplicates ignored by Abaqus)
   nSymIds.push(bfNid(midXi,midZi));
 
-  // Left support: full bottom-flange cross-section at x=0
-  var nLeft=[];
-  for (var zi=0;zi<=nzF;zi++) nLeft.push(bfNid(0,zi));
+  // Helper: map physical x-position to mesh indices on (possibly nonuniform) xs
+  function nearestNodeXi(xq){
+    var best=0, bd=Infinity;
+    for (var i=0;i<xs.length;i++) {
+      var d=Math.abs(xs[i]-xq);
+      if (d<bd) { bd=d; best=i; }
+    }
+    return best;
+  }
+  function elemXiAt(xq){
+    if (xq<=xs[0]) return 0;
+    if (xq>=xs[xs.length-1]) return nx-1;
+    for (var i=0;i<nx;i++) if (xq>=xs[i] && xq<=xs[i+1]) return i;
+    return Math.max(0,Math.min(nx-1,Math.round(xq/(p.L/nx))));
+  }
 
-  // Right support: full bottom-flange cross-section at x=L (not needed with symmetry model,
-  // kept for full-span models — symmetry BC replaces the right "roller")
+  // Supports: use nearest mesh cross-sections to requested support positions
+  var sLxi = nearestNodeXi(p.sx1);
+  var sRxi = nearestNodeXi(p.sx2);
+
+  // Left support: full bottom-flange cross-section at x≈sx1
+  var nLeft=[];
+  for (var zi=0;zi<=nzF;zi++) nLeft.push(bfNid(sLxi,zi));
+
+  // Right support: full bottom-flange cross-section at x≈sx2
   var nRight=[];
-  for (var zi=0;zi<=nzF;zi++) nRight.push(bfNid(nx,zi));
+  for (var zi=0;zi<=nzF;zi++) nRight.push(bfNid(sRxi,zi));
 
   // Midspan bottom flange (output)
   var nMidBot=[];
@@ -1416,16 +1445,15 @@ function makeINP(prof, p, idx) {
   // Load nsets: top flange cross-section at each load x
   var loadXs = bendMode==='3pt' ? [p.L/2] : [p.a, p.L-p.a];
   var loadNsetsArr=[];
-  loadXs.forEach(function(lx) {
-    var xi=Math.max(0,Math.min(nx,Math.round(lx/(p.L/nx))));
-    var key=Math.round(lx), ids=[];
+  loadXs.forEach(function(lx, li) {
+    var xi=nearestNodeXi(lx), ids=[];
     for (var zi=0;zi<=nzF;zi++) ids.push(tfNid(xi,zi));
-    loadNsetsArr.push({key:key, ids:ids});
+    loadNsetsArr.push({name:'L'+(li+1), ids:ids, xApplied:xs[xi]});
   });
 
   // Output element sets (near midspan / load point)
   var mxi=Math.max(0,midXi-1);
-  var lxi=Math.max(0,Math.round(loadXs[0]/(p.L/nx))-1);
+  var lxi=Math.max(0,elemXiAt(loadXs[0]));
   var eBFids=[], eTFids=[], eWEBids=[];
   for (var k=0;k<nzF;k++) { eBFids.push(bfES+mxi*nzF+k); eTFids.push(tfES+mxi*nzF+k); }
   for (var k=0;k<nyW;k++) {
@@ -1540,13 +1568,14 @@ function makeINP(prof, p, idx) {
     w('**   → Assigned via per-column element sets (WEB/TF/BF-COL-NNN)');
   }
   w('**');
-  w('** LOADING : '+testType+'   load x = '+loadXs.join(', ')+' mm');
+  w('** LOADING : '+testType+'   requested load x = '+loadXs.join(', ')+' mm');
+  w('**           mapped to nearest mesh x = '+loadNsetsArr.map(function(ls){return ls.xApplied;}).join(', ')+' mm');
   w('** TARGET  : P_total = '+p.Ptot+' kN   ('+loadPerNode.toFixed(2)+' N/node × '+totalLoadNodes+' nodes)');
   w('**           LPF = 1.0 corresponds to P_total; step continues past 1.0 to capture post-peak');
   w('**');
   w('** BOUNDARY CONDITIONS (full-span model):');
-  w('**   Left support  x=0 : U1=U2=U3=0  (pin — fully fixed translations)');
-  w('**   Right support x=L : U1=U2=U3=0  (roller — fully fixed translations)');
+  w('**   Left support  requested x='+p.sx1+' mm, mapped x='+xs[sLxi]+' mm : U1=U2=U3=0');
+  w('**   Right support requested x='+p.sx2+' mm, mapped x='+xs[sRxi]+' mm : U1=U2=U3=0');
   w('**');
   w('** MATERIAL : E='+p.E+' MPa   ν='+p.nu+'   fy='+p.fy+' MPa   fu='+p.fu+' MPa   εu='+p.eu+'%');
   w('** ================================================================');
@@ -1650,7 +1679,7 @@ function makeINP(prof, p, idx) {
   w('*Nset, nset=N-RIGHT-SUPPORT, instance=IBEAM-1');   wChunk(nRight,16);
   w('*Nset, nset=N-SYMMETRY,      instance=IBEAM-1');   wChunk(nSymIds,16);
   loadNsetsArr.forEach(function(ls){
-    w('*Nset, nset=N-LOAD-'+ls.key+', instance=IBEAM-1'); wChunk(ls.ids,16);
+    w('*Nset, nset=N-LOAD-'+ls.name+', instance=IBEAM-1'); wChunk(ls.ids,16);
   });
   w('*Nset, nset=N-MIDSPAN-BOT,  instance=IBEAM-1');   wChunk(nMidBot,16);
   w('*Nset, nset=N-MIDSPAN-NEUT, instance=IBEAM-1');   wChunk(nMidNeut,16);
@@ -1670,11 +1699,11 @@ function makeINP(prof, p, idx) {
   // ║  BOUNDARY CONDITIONS                                                    ║
   // ╚══════════════════════════════════════════════════════════════════════════╝
   wSec('BOUNDARY CONDITIONS');
-  w('** Left support at x=0 — PIN: U1=U2=U3=0');
+  w('** Left support requested x='+p.sx1+' mm, mapped x='+xs[sLxi]+' mm — PIN: U1=U2=U3=0');
   w('**   U1=axial(x)  U2=vertical(y)  U3=lateral(z)');
   w('*Boundary');
   w('N-LEFT-SUPPORT, 1, 3, 0.0');
-  w('** Right support at x=L — ROLLER: U1=U2=U3=0');
+  w('** Right support requested x='+p.sx2+' mm, mapped x='+xs[sRxi]+' mm — ROLLER: U1=U2=U3=0');
   w('**   (All three translations fixed; rotations remain free)');
   w('*Boundary');
   w('N-RIGHT-SUPPORT, 1, 3, 0.0');
@@ -1696,9 +1725,10 @@ function makeINP(prof, p, idx) {
 
   wSec('APPLIED LOADS');
   w('** P_total = '+p.Ptot+' kN distributed as '+loadPerNode.toFixed(4)+' N/node over '+totalLoadNodes+' nodes');
+  w('** Requested load x='+loadXs.join(', ')+' mm; mapped x='+loadNsetsArr.map(function(ls){return ls.xApplied;}).join(', ')+' mm');
   w('** Positive LPF → load in –y direction (downward)');
   w('*Cload');
-  loadXs.forEach(function(lx){ w('N-LOAD-'+Math.round(lx)+', 2, -'+loadPerNode.toFixed(4)); });
+  loadNsetsArr.forEach(function(ls){ w('N-LOAD-'+ls.name+', 2, -'+loadPerNode.toFixed(4)); });
 
   wSec('MONITOR');
   w('*Monitor, node=IBEAM-1.'+monitorNode+', dof=2, frequency=1');
