@@ -1216,9 +1216,11 @@ function makeINP(prof, p, idx) {
   function uniqSorted(arr){
     return arr.sort(function(a,b){return a-b;}).filter(function(v,i,a){ return i===0 || Math.abs(v-a[i-1])>1e-6; });
   }
-  function buildAxisRefined(L, coarse, fineStart, fineEnd, fineSize, pad){
+  function buildAxisRefined(L, coarse, fineStart, fineEnd, fineSize, pad, anchors){
     var out=[0], x=0;
     coarse=Math.max(2,coarse); fineSize=Math.max(1,fineSize); pad=Math.max(0,pad||0);
+    fineStart=Math.max(0,Math.min(L,fineStart)); fineEnd=Math.max(0,Math.min(L,fineEnd));
+    if (fineEnd<fineStart) { var tt=fineStart; fineStart=fineEnd; fineEnd=tt; }
     while (x < L-1e-9) {
       var inFine = (x >= (fineStart-pad) && x < (fineEnd+pad));
       var dx = inFine ? Math.min(coarse, fineSize) : coarse;
@@ -1228,6 +1230,20 @@ function makeINP(prof, p, idx) {
       x=nxv;
     }
     out[0]=0; out[out.length-1]=r4(L);
+    var merged = out.concat([fineStart,fineEnd]).concat(anchors||[]);
+    return uniqSorted(merged.map(r4));
+  }
+  function enforceMinSegments(axis, a, b, nMin){
+    a=Math.min(a,b); b=Math.max(a,b);
+    var inside=0;
+    for (var i=0;i<axis.length-1;i++) {
+      var c0=axis[i], c1=axis[i+1];
+      if (c1<=a || c0>=b) continue;
+      inside++;
+    }
+    if (inside>=nMin) return axis;
+    var out=axis.slice();
+    for (var n=1;n<nMin;n++) out.push(r4(a + (b-a)*n/nMin));
     return uniqSorted(out);
   }
   function yRangeForZeroGeom(pr){
@@ -1240,10 +1256,14 @@ function makeINP(prof, p, idx) {
   var xs=[], ysW=[], zsF=[];
   if (prof.type==='zerogeom') {
     var yr = yRangeForZeroGeom(prof);
-    var fineX = Math.max(1.5, Math.min(p.mesh/3, prof.w/6));
-    var fineY = Math.max(1.5, Math.min(p.mesh/3, Math.max(8, prof.h/6)));
-    xs  = buildAxisRefined(p.L, p.mesh, Math.max(0,prof.xc-prof.w/2), Math.min(p.L,prof.xc+prof.w/2), fineX, p.mesh);
-    ysW = buildAxisRefined(p.d, p.mesh, yr[0], yr[1], fineY, p.mesh*0.5);
+    var xA=Math.max(0,prof.xc-prof.w/2), xB=Math.min(p.L,prof.xc+prof.w/2);
+    var yA=yr[0], yB=yr[1];
+    var fineX = Math.max(0.75, Math.min(p.mesh*0.5, Math.max(1.0, prof.w/8)));
+    var fineY = Math.max(0.75, Math.min(p.mesh*0.5, Math.max(1.0, Math.max(8,prof.h)/8)));
+    xs  = buildAxisRefined(p.L, p.mesh, xA, xB, fineX, p.mesh, [prof.xc]);
+    ysW = buildAxisRefined(p.d, p.mesh, yA, yB, fineY, p.mesh*0.5, [prof.yc]);
+    xs  = enforceMinSegments(xs, xA, xB, 6);
+    ysW = enforceMinSegments(ysW, yA, yB, 4);
   } else {
     var nx0=Math.max(4,Math.ceil(p.L/p.mesh)), ny0=Math.max(2,Math.ceil(p.d/p.mesh));
     for (var i=0;i<=nx0;i++) xs.push(r4(i*p.L/nx0));
