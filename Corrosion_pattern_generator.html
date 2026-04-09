@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Abaqus I-Beam Generator</title>
+<title>Abaqus Corrosion Pattern Generator</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
@@ -162,8 +162,8 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
 <header>
   <div class="hbadge">FEA</div>
   <div>
-    <div class="htitle">Abaqus I-Beam Generator</div>
-    <div class="hsub">3PT / 4PT Bending &bull; Load-to-Failure (Riks) &bull; Corrosion Profiles &bull; Standard Sections</div>
+    <div class="htitle">Abaqus Corrosion Pattern Generator</div>
+    <div class="hsub">Focus: Corrosion Pattern Variants &bull; Hole/Rectangle Defects &bull; Position Sweeps</div>
   </div>
   <div class="hright">
     <span class="hpill">S4R Shell</span>
@@ -303,6 +303,7 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
       <button class="ctab"     onclick="setCT('zone')">Zone</button>
       <button class="ctab"     onclick="setCT('fullwall')">Full Wall Loss</button>
       <button class="ctab"     onclick="setCT('random')">Random</button>
+      <button class="ctab"     onclick="setCT('zerogeom')">Zero Hole/Rect</button>
       <button class="ctab"     onclick="setCT('custom')">Custom</button>
     </div>
 
@@ -506,6 +507,41 @@ pre { font-family: var(--mono); font-size: 11px; line-height: 1.75; padding: 16p
       </div>
       <div class="row r1"><div class="fld"><label>Profile name</label><input type="text" id="rname" placeholder="e.g. RAND_A"></div></div>
       <button class="btn bout bfull" onclick="addRandom()">+ Add Random Profile</button>
+    </div>
+
+    <!-- Zero-Thickness Geometry Sweep -->
+    <div class="cconf" id="cf-zerogeom">
+      <div class="hint">Create a <b>zero-thickness web defect</b> as a circle (hole) or rectangle and sweep its x-position. The defect can be centered in web depth or extended to the web-flange connection.</div>
+      <div class="row r2">
+        <div class="fld"><label>Shape</label>
+          <select id="zgshape">
+            <option value="circle">Circle (hole)</option>
+            <option value="rect">Rectangle</option>
+          </select>
+        </div>
+        <div class="fld"><label>Vertical mode</label>
+          <select id="zgvmode">
+            <option value="center">Centered at y</option>
+            <option value="top">Touch top connection</option>
+            <option value="bottom">Touch bottom connection</option>
+            <option value="fullweb">Full web height</option>
+          </select>
+        </div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>X start (mm)</label><input type="number" id="zgx1" value="600" step="50"></div>
+        <div class="fld"><label>X end (mm)</label><input type="number" id="zgx2" value="1400" step="50"></div>
+      </div>
+      <div class="row r3">
+        <div class="fld"><label>Positions N</label><input type="number" id="zgn" value="5" min="1" max="30" step="1"></div>
+        <div class="fld"><label>Width (mm)</label><input type="number" id="zgw" value="120" step="10" min="1"></div>
+        <div class="fld"><label>Height (mm)</label><input type="number" id="zgh" value="80" step="10" min="1"></div>
+      </div>
+      <div class="row r2">
+        <div class="fld"><label>Y center (mm from BF)</label><input type="number" id="zgy" value="100" step="10" min="0"></div>
+        <div class="fld"><label>Label prefix</label><input type="text" id="zgnm" value="WEB_DEF"></div>
+      </div>
+      <button class="btn bout bfull" onclick="addZeroGeomSweep()">+ Add Zero-Thickness Sweep</button>
     </div>
 
     <!-- Custom -->
@@ -714,7 +750,7 @@ function setBend(m) {
 }
 
 function setCT(t) {
-  var tabs = ['uniform','pitting','girder','zone','fullwall','random','custom'];
+  var tabs = ['uniform','pitting','girder','zone','fullwall','random','zerogeom','custom'];
   document.querySelectorAll('.ctab').forEach(function(b,i) { b.classList.toggle('act', tabs[i]===t); });
   document.querySelectorAll('.cconf').forEach(function(c) { c.classList.remove('act'); });
   document.getElementById('cf-'+t).classList.add('act');
@@ -772,6 +808,17 @@ function drawXS() {
 function getLoss(prof, xFrac, zone) {
   if (!prof) return 0;
   var p = getP(), xMm = xFrac * p.L;
+  function zeroGeomLoss(pr, x, face) {
+    if (face!=='web') return 0;
+    var w = Math.max(1, pr.w), h = Math.max(1, pr.h);
+    var xIn = Math.abs(x-pr.xc) <= w/2;
+    if (!xIn) return 0;
+    if (pr.shape==='circle') {
+      // map face-preview to equivalent full penetration if in x-span
+      return p.tw;
+    }
+    return p.tw;
+  }
   function randomLossAt(arr, xf) {
     if (!arr || !arr.length) return 0;
     var n = arr.length;
@@ -804,6 +851,8 @@ function getLoss(prof, xFrac, zone) {
       if (zone==='tf')  return randomLossAt(prof.tfLoss, xFrac);
       if (zone==='bf')  return randomLossAt(prof.bfLoss, xFrac);
       return 0;
+    case 'zerogeom':
+      return zeroGeomLoss(prof, xMm, zone);
     case 'custom':
       if (zone==='tf')  return prof.tfL;
       if (zone==='web') return prof.wL;
@@ -869,7 +918,7 @@ function drawMap(prof) {
   ctx.beginPath(); ctx.moveTo(bx,bfY);  ctx.lineTo(ex,bfY);  ctx.stroke();
 
   // Zone boundaries
-  if (prof && (prof.type==='zone' || prof.type==='fullwall' || prof.type==='random') && prof.x1!==undefined && prof.x2!==undefined) {
+  if (prof && (prof.type==='zone' || prof.type==='fullwall' || prof.type==='random' || prof.type==='zerogeom') && prof.x1!==undefined && prof.x2!==undefined) {
     var zx1=bx+(prof.x1/p.L)*bLen, zx2=bx+(prof.x2/p.L)*bLen;
     ctx.strokeStyle='rgba(0,229,180,0.5)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
     [zx1,zx2].forEach(function(zx){ ctx.beginPath(); ctx.moveTo(zx,by-2); ctx.lineTo(zx,ey); ctx.stroke(); });
@@ -1032,6 +1081,30 @@ function addRandom() {
   });
   refresh();
 }
+function addZeroGeomSweep() {
+  var p=getP();
+  var shape=gs('zgshape');
+  var vmode=gs('zgvmode');
+  var x1=Math.max(0, Math.min(p.L, gv('zgx1')));
+  var x2=Math.max(0, Math.min(p.L, gv('zgx2')));
+  if (x2<x1) { var tx=x1; x1=x2; x2=tx; }
+  var n=Math.max(1, Math.round(gv('zgn')));
+  var w=Math.max(1, gv('zgw'));
+  var h=Math.max(1, gv('zgh'));
+  var yc=Math.max(0, Math.min(p.d, gv('zgy')));
+  var prefix=(gs('zgnm').trim()||'WEB_DEF').replace(/\s+/g,'_');
+  for (var i=0;i<n;i++) {
+    var xc = n===1 ? (x1+x2)/2 : (x1 + (x2-x1)*i/(n-1));
+    var label = prefix+'_'+shape.toUpperCase()+'_X'+Math.round(xc);
+    profiles.push({
+      type:'zerogeom',shape:shape,vmode:vmode,xc:parseFloat(xc.toFixed(3)),yc:yc,w:w,h:h,
+      x1:parseFloat((xc-w/2).toFixed(3)),x2:parseFloat((xc+w/2).toFixed(3)),
+      label:label,
+      desc:'Zero-thickness '+shape+' on web @x='+xc.toFixed(1)+' mm  w='+w+' mm h='+h+' mm vmode='+vmode
+    });
+  }
+  refresh();
+}
 function addCustom() {
   var nm=gs('cnm').trim()||('CUST_'+profiles.length),tf=gv('ctf'),w=gv('cw'),bf=gv('cbf');
   profiles.push({type:'custom',tfL:tf,wL:w,bfL:bf,label:nm,
@@ -1057,7 +1130,7 @@ function clearAll() {
 }
 function refresh() {
   var el=document.getElementById('plist');
-  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',fullwall:'FWL',random:'RND',custom:'CST'};
+  var tags={uniform:'UNI',pitting:'PIT',girder:'GDR',zone:'ZNE',fullwall:'FWL',random:'RND',zerogeom:'ZER',custom:'CST'};
   el.innerHTML = profiles.length
     ? profiles.map(function(p,i){
         return '<div class="pitem'+(i===selIdx?' sel':'')+'" onclick="selProf('+i+')">'
@@ -1087,7 +1160,7 @@ function chunkList(ids, n) {
  * Returns null for profiles with globally uniform thickness.
  */
 function profileThicknesses(prof, p, nx, xs) {
-  if (!(prof.type==='zone' || prof.type==='random' || prof.type==='fullwall')) return null;
+  if (!(prof.type==='zone' || prof.type==='random' || prof.type==='fullwall' || prof.type==='zerogeom')) return null;
   var result={webT:[],tfT:[],bfT:[]};
   for (var xi=0;xi<nx;xi++) {
     var xc = (xs[xi]+xs[xi+1])/2;
@@ -1257,6 +1330,10 @@ function makeINP(prof, p, idx) {
     etf=Math.min.apply(null, vt.tfT);
     etw=Math.min.apply(null, vt.webT);
     ebf=Math.min.apply(null, vt.bfT);
+  } else if (prof.type==='zerogeom') {
+    etf=p.tf;
+    ebf=p.tf;
+    etw=0.5;
   } else { // custom
     etf=Math.max(0.5,p.tf-prof.tfL); etw=Math.max(0.5,p.tw-prof.wL); ebf=Math.max(0.5,p.tf-prof.bfL);
   }
@@ -1316,6 +1393,9 @@ function makeINP(prof, p, idx) {
     w('** Random pitting zone x=['+prof.x1+','+prof.x2+'] mm  pits='+prof.nPits+'  apply_to='+prof.loc);
     w('** Pit dia=['+prof.dMin+','+prof.dMax+'] mm  depth=['+prof.depMin+','+prof.depMax+'] mm  seed='+prof.seed+'  smooth='+prof.smooth+' pts');
     w('** Element-distribution *Shell Section used — thickness varies per longitudinal column');
+  } else if (prof.type==='zerogeom') {
+    w('** Zero-thickness geometry: '+prof.shape+'  xc='+prof.xc+' mm  yc='+prof.yc+' mm  w='+prof.w+' mm  h='+prof.h+' mm  vmode='+prof.vmode);
+    w('** Web elements inside geometry are assigned residual t=0.5 mm');
   } else {
     w('** EFFECTIVE THICKNESSES (post-corrosion, applied per element column):');
     w('**   TF = '+etf.toFixed(3)+' mm  (loss='+(p.tf-etf).toFixed(3)+' mm, '+((p.tf-etf)/p.tf*100).toFixed(1)+'%)');
@@ -1370,32 +1450,74 @@ function makeINP(prof, p, idx) {
     w('** Full-wall-loss profile: zone=['+prof.x1+','+prof.x2+'] mm  apply_to='+prof.loc);
   } else if (prof.type==='random') {
     w('** Random pitting profile: zone=['+prof.x1+','+prof.x2+'] mm  pits='+prof.nPits+'  seed='+prof.seed+'  smooth='+prof.smooth+' pts');
+  } else if (prof.type==='zerogeom') {
+    w('** Zero-thickness geometry profile on web (2D x-y mask)');
   } else {
     w('** Profile type: '+prof.type+'  (uniform thickness along full span, one section per column)');
   }
-  for (var xi=0;xi<nx;xi++) {
-    var colLabel='COL-'+String(xi+1).padStart(3,'0');
-    var twEff, tfEff, bfEff;
-    if (isVariableProfile) {
-      twEff = vt.webT[xi]; tfEff = vt.tfT[xi]; bfEff = vt.bfT[xi];
-    } else {
-      twEff = etw; tfEff = etf; bfEff = ebf;
+  if (prof.type==='zerogeom') {
+    var webZeroIds=[], webIntactIds=[];
+    function webIsZeroAt(xc, yc) {
+      var wHalf=prof.w/2, hHalf=prof.h/2;
+      var xInside=Math.abs(xc-prof.xc) <= wHalf;
+      if (!xInside) return false;
+      if (prof.vmode==='fullweb') return true;
+      if (prof.vmode==='top') return yc >= Math.max(0, p.d-prof.h);
+      if (prof.vmode==='bottom') return yc <= Math.min(p.d, prof.h);
+      if (prof.shape==='circle') {
+        var dx=(xc-prof.xc)/Math.max(1e-6,wHalf), dy=(yc-prof.yc)/Math.max(1e-6,hHalf);
+        return (dx*dx + dy*dy) <= 1.0;
+      }
+      return Math.abs(yc-prof.yc) <= hHalf;
     }
-    // Web column elements
-    var wColES = webES + xi*nyW, wColEE = webES + (xi+1)*nyW - 1;
-    w('*Elset, elset=WEB-'+colLabel+', generate'); w(wColES+', '+wColEE+', 1');
-    w('*Shell Section, elset=WEB-'+colLabel+', material=STEEL');
-    w(twEff.toFixed(4)+', 5');
-    // TF column elements
-    var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
-    w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
-    w('*Shell Section, elset=TF-'+colLabel+', material=STEEL');
-    w(tfEff.toFixed(4)+', 5');
-    // BF column elements
-    var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
-    w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
-    w('*Shell Section, elset=BF-'+colLabel+', material=STEEL');
-    w(bfEff.toFixed(4)+', 5');
+    for (var xi=0;xi<nx;xi++) {
+      var xc=(xs[xi]+xs[xi+1])/2;
+      for (var yi=0;yi<nyW;yi++) {
+        var yc=(ysW[yi]+ysW[yi+1])/2;
+        var eId=webES + xi*nyW + yi;
+        if (webIsZeroAt(xc,yc)) webZeroIds.push(eId); else webIntactIds.push(eId);
+      }
+      var colLabel='COL-'+String(xi+1).padStart(3,'0');
+      var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
+      var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
+      w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
+      w('*Shell Section, elset=TF-'+colLabel+', material=STEEL'); w(p.tf.toFixed(4)+', 5');
+      w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
+      w('*Shell Section, elset=BF-'+colLabel+', material=STEEL'); w(p.tf.toFixed(4)+', 5');
+    }
+    if (webIntactIds.length) {
+      w('*Elset, elset=WEB-INTACT'); wChunk(webIntactIds,16);
+      w('*Shell Section, elset=WEB-INTACT, material=STEEL'); w(p.tw.toFixed(4)+', 5');
+    }
+    if (webZeroIds.length) {
+      w('*Elset, elset=WEB-ZERO'); wChunk(webZeroIds,16);
+      w('*Shell Section, elset=WEB-ZERO, material=STEEL'); w('0.5000, 5');
+    }
+  } else {
+    for (var xi=0;xi<nx;xi++) {
+      var colLabel='COL-'+String(xi+1).padStart(3,'0');
+      var twEff, tfEff, bfEff;
+      if (isVariableProfile) {
+        twEff = vt.webT[xi]; tfEff = vt.tfT[xi]; bfEff = vt.bfT[xi];
+      } else {
+        twEff = etw; tfEff = etf; bfEff = ebf;
+      }
+      // Web column elements
+      var wColES = webES + xi*nyW, wColEE = webES + (xi+1)*nyW - 1;
+      w('*Elset, elset=WEB-'+colLabel+', generate'); w(wColES+', '+wColEE+', 1');
+      w('*Shell Section, elset=WEB-'+colLabel+', material=STEEL');
+      w(twEff.toFixed(4)+', 5');
+      // TF column elements
+      var tfColES = tfES + xi*nzF, tfColEE = tfES + (xi+1)*nzF - 1;
+      w('*Elset, elset=TF-'+colLabel+', generate'); w(tfColES+', '+tfColEE+', 1');
+      w('*Shell Section, elset=TF-'+colLabel+', material=STEEL');
+      w(tfEff.toFixed(4)+', 5');
+      // BF column elements
+      var bfColES = bfES + xi*nzF, bfColEE = bfES + (xi+1)*nzF - 1;
+      w('*Elset, elset=BF-'+colLabel+', generate'); w(bfColES+', '+bfColEE+', 1');
+      w('*Shell Section, elset=BF-'+colLabel+', material=STEEL');
+      w(bfEff.toFixed(4)+', 5');
+    }
   }
 
   w('*End Part');
@@ -1538,6 +1660,8 @@ function makeINP(prof, p, idx) {
     w('**   Full-wall zone: x=['+prof.x1+','+prof.x2+'] mm  apply_to='+prof.loc);
   } else if (prof.type==='random') {
     w('**   Random pits: x=['+prof.x1+','+prof.x2+'] mm  n='+prof.nPits+'  dia=['+prof.dMin+','+prof.dMax+'] mm  depth=['+prof.depMin+','+prof.depMax+'] mm  seed='+prof.seed);
+  } else if (prof.type==='zerogeom') {
+    w('**   Zero-geometry: '+prof.shape+'  xc='+prof.xc+' mm  yc='+prof.yc+' mm  w='+prof.w+' mm  h='+prof.h+' mm  vmode='+prof.vmode);
   } else {
     w('**   Corrosion: TF='+(p.tf-etf).toFixed(3)+' mm  WEB='+(p.tw-etw).toFixed(3)+' mm  BF='+(p.tf-ebf).toFixed(3)+' mm');
   }
